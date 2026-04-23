@@ -2,6 +2,8 @@
 
 React web interface for `irods-go-rest`.
 
+[Developer notes](./DEV_NOTES.md)
+
 ## Stack
 
 - Vite
@@ -12,6 +14,14 @@ React web interface for `irods-go-rest`.
 Mantine was chosen because it gives the cleanest operator-style UI for a data
 console with less setup and design drift than heavier component suites or a
 hand-assembled Tailwind stack.
+
+Starbase uses Vite for local development and build output, React Router for the
+top-level application flow, Mantine for the UI shell and form primitives, and
+TanStack Query for backend state. The runtime is split into a small shared app
+shell in `src/App.tsx`, route definitions in `src/router.tsx`, page-level
+workflows under `src/pages`, and a typed `irods-go-rest` client in
+`src/lib/irods-rest.ts`, with Vite proxying API traffic to the Go backend
+during local development.
 
 ## Development
 
@@ -38,4 +48,3 @@ Copy `.env.example` if you want to override defaults:
 - Collection lookup against `GET /api/v1/collections/{collection_id}`
 - Bearer token input for protected API calls
 - Setup page with local integration notes
-# starbase
