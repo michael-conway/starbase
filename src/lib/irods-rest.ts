@@ -68,7 +68,7 @@ async function request<T>(path: string, token?: string, baseUrl?: string): Promi
     try {
       payload = (await response.json()) as ApiErrorPayload
     } catch {
-      payload = null
+      // Fall back to the HTTP status when the response body is not JSON.
     }
 
     throw new ApiError(
