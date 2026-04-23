@@ -29,6 +29,68 @@
 - [irods-go-drs iRODS integration tests](../irods-go-drs/test/drs_to_irods_service_integration_test.go): compose-backed iRODS tests against the `deployments/docker-test-framework/5-0` stack
 - [irods-go-drs deployment notes](../irods-go-drs/deployments/README.md): matching docker test framework overview
 
+## Runbook
+
+### Frontend only
+
+Run the UI from this repository:
+
+```bash
+npm install
+npm run dev
+```
+
+Vite serves the frontend locally and proxies API traffic to
+`http://localhost:8080` by default.
+
+### End-to-end local development
+
+Start the shared docker-backed integration environment first:
+
+```bash
+cd ../irods-go-rest/deployments/docker-test-framework/5-0
+docker compose build
+docker compose up
+```
+
+Then start the backend in a separate terminal:
+
+```bash
+cd ../irods-go-rest
+go run ./cmd/irods-go-rest
+```
+
+Then start the frontend in another terminal:
+
+```bash
+cd ../starbase
+npm install
+npm run dev
+```
+
+Open the local Vite URL, usually `http://localhost:5173`.
+
+### Integration test
+
+Run the frontend integration suite against a running `irods-go-rest` service:
+
+```bash
+cd ../starbase
+STARBASE_INTEGRATION=1 \
+STARBASE_TEST_BASE_URL=http://localhost:8080 \
+STARBASE_TEST_BEARER_TOKEN='your bearer token' \
+STARBASE_TEST_OBJECT_ID='your object id' \
+STARBASE_TEST_COLLECTION_ID='your collection id' \
+npm run test:integration
+```
+
+Behavior notes:
+
+- `STARBASE_INTEGRATION=1` enables the integration suite
+- `STARBASE_TEST_BASE_URL` defaults to `http://localhost:8080`
+- object and collection checks are skipped unless the bearer token and target ids are provided
+- the expected backing environment is `../irods-go-rest/deployments/docker-test-framework/5-0`
+
 ## External docs
 
 - [React docs](https://react.dev/)
