@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+.idea
+.DS_tore
+dist
+node_modules
+.ai 
