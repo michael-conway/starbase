@@ -1,0 +1,37 @@
+:root {
+  color: #e6edf3;
+  background:
+    radial-gradient(circle at top, rgba(43, 138, 230, 0.22), transparent 30%),
+    linear-gradient(180deg, #07111d 0%, #0c1724 55%, #111f2e 100%);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+}
+
+.shell-header {
+  background: rgba(7, 17, 29, 0.78);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.hero-panel {
+  background:
+    linear-gradient(135deg, rgba(8, 26, 46, 0.96), rgba(17, 32, 52, 0.94)),
+    linear-gradient(135deg, #0d2235, #1b2b45);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
