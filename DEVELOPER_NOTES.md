@@ -29,6 +29,12 @@ Design assumptions:
   practical
 * prefer accessible, professional, light-theme defaults unless there is a clear
   product reason to change them
+* always flag frontend complexity that could be removed by adding or refining a
+  backend REST service
+* do not normalize avoidable domain or workflow complexity in the UI or
+  JavaScript layer when it belongs in `irods-go-rest`
+* when a feature starts requiring fragile client-side orchestration, propose the
+  corresponding backend contract or service change explicitly
 
 Implementation assumptions:
 
@@ -39,6 +45,9 @@ Implementation assumptions:
 * `src/providers/session.tsx` is the frontend auth/session boundary
 * explorer-specific interaction patterns should be treated as product code, not
   as accidental side effects of a component library
+* if implementing a UI feature requires encoding backend-facing workflow logic,
+  state reconciliation rules, or path semantics in the frontend, stop and note
+  the upper-layer service change that would simplify the client
 
 When changing the UI, favor stronger separation of concerns over short-term
 convenience. Avoid turning the explorer into a generic card dashboard. Avoid
@@ -64,6 +73,10 @@ Use these assumptions when continuing work in `starbase`:
   unless there is a strong reason to introduce a new identifier space
 * keep the visible product slice focused until a new top-level workflow is
   product-ready
+* always identify frontend complexity that should instead be provided by an
+  upper service layer in `irods-go-rest`
+* do not encode avoidable business rules, path interpretation rules, or
+  multi-step orchestration logic in the browser if a REST service can absorb it
 
 When a frontend feature is proposed, ask:
 
@@ -73,6 +86,8 @@ When a frontend feature is proposed, ask:
 * can the route be expressed as a RESTful subresource of `/path`?
 * does the new route preserve the same identifier and navigation philosophy as
   `irods-go-rest`?
+* what complexity is currently being carried in the UI that should be pushed up
+  into `irods-go-rest` instead?
 
 ### Development Plan
 

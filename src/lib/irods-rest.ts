@@ -11,12 +11,19 @@ export interface ParentLink {
   href: string
 }
 
+export interface PathSegmentLink {
+  display_name: string
+  irods_path: string
+  href: string
+}
+
 export interface PathEntry {
   id: string
   path: string
   kind: 'data_object' | 'collection'
   zone: string
   parent?: ParentLink
+  path_segments: PathSegmentLink[]
   hasChildren?: boolean
   childCount?: number
   checksum?: string
@@ -27,6 +34,7 @@ export interface PathEntry {
 
 export interface PathChildrenResponse {
   irods_path: string
+  path_segments: PathSegmentLink[]
   children: PathEntry[]
 }
 

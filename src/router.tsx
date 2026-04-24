@@ -3,6 +3,7 @@ import { Loader, Stack } from '@mantine/core'
 import { Navigate, Outlet, createBrowserRouter } from 'react-router-dom'
 import App from './App'
 import { primarySections } from './app-sections'
+import { ExplorerDetailsPage } from './pages/ExplorerDetailsPage'
 import { LoginPage } from './pages/LoginPage'
 import { SetupPage } from './pages/SetupPage'
 import { useSession } from './providers/session'
@@ -76,6 +77,10 @@ export const router = createBrowserRouter([
             path: section.slug,
             element: lazyElement(section.importPage, section.exportName),
           })),
+          {
+            path: 'explorer/details',
+            element: <ExplorerDetailsPage />,
+          },
           {
             path: 'setup',
             element: <SetupPage />,

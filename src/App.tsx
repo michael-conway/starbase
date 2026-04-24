@@ -1,8 +1,9 @@
+import { useState } from 'react'
 import { Link, NavLink, Outlet } from 'react-router-dom'
 import {
-  Anchor,
   AppShell,
   Badge,
+  Burger,
   Button,
   Container,
   Divider,
@@ -21,6 +22,7 @@ import { useSession } from './providers/session'
 
 function App() {
   const { clearSession, connection } = useSession()
+  const [menuOpened, setMenuOpened] = useState(true)
   const healthQuery = useQuery({
     queryKey: ['health', connection.baseUrl],
     queryFn: () => getHealth(connection.baseUrl),
@@ -31,7 +33,7 @@ function App() {
   return (
     <AppShell
       header={{ height: 76 }}
-      navbar={{ width: 280, breakpoint: 'md' }}
+      navbar={{ width: 280, breakpoint: 'md', collapsed: { mobile: !menuOpened, desktop: !menuOpened } }}
       padding="lg"
     >
       <AppShell.Header className="shell-header">
@@ -39,13 +41,16 @@ function App() {
           <Group justify="space-between" h="100%">
             <div>
               <Group gap="sm" align="center">
+                <Burger
+                  opened={menuOpened}
+                  onClick={() => setMenuOpened((current) => !current)}
+                  size="sm"
+                  aria-label={menuOpened ? 'Hide main menu' : 'Show main menu'}
+                />
                 <Title order={2}>starbase</Title>
-                <Badge variant="light" color="cyan">
-                  starter template
-                </Badge>
               </Group>
               <Text size="sm" c="dimmed">
-                iRODS browser starter over `irods-go-rest`.
+                iRODS Explorer
               </Text>
             </div>
 
@@ -60,7 +65,7 @@ function App() {
               </Group>
               <Group gap="xs">
                 <Text size="sm" c="dimmed">
-                  API
+                  Status
                 </Text>
                 <Badge
                   color={
@@ -78,9 +83,6 @@ function App() {
                       ? 'offline'
                       : 'checking'}
                 </Badge>
-                <Anchor href="/swagger" target="_blank" size="sm">
-                  Swagger
-                </Anchor>
               </Group>
             </Stack>
           </Group>
@@ -94,7 +96,7 @@ function App() {
               Workspace
             </Text>
             <Text size="sm" mt={4}>
-              Start with browsing, uploads, downloads, and collection work.
+              iRODS Explorer
             </Text>
           </div>
 
@@ -121,11 +123,8 @@ function App() {
               Connection
             </Text>
             <Badge variant="light" color="blue">
-              {connection.auth.mode === 'basic' ? 'Basic auth' : 'OIDC bearer'}
+              {connection.auth.mode === 'basic' ? 'Basic auth' : 'OIDC'}
             </Badge>
-            <Text size="sm" c="dimmed">
-              {connection.baseUrl || 'Using Vite proxy to localhost:8080'}
-            </Text>
           </Stack>
 
           <div style={{ flex: 1 }} />
@@ -137,7 +136,7 @@ function App() {
             variant="default"
             leftSection={<IconBinoculars size={18} />}
           >
-            Setup and stack notes
+            Setup
           </Button>
         </Stack>
       </AppShell.Navbar>
