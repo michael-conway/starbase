@@ -1,20 +1,15 @@
-import { startTransition, useEffect, useMemo, useState } from 'react'
+import { useState } from 'react'
 import {
-  ActionIcon,
   Alert,
-  Anchor,
   Badge,
+  Breadcrumbs,
   Button,
   Card,
   Code,
-  CopyButton,
   Divider,
-  Grid,
   Group,
+  Loader,
   Paper,
-  PasswordInput,
-  SegmentedControl,
-  SimpleGrid,
   Stack,
   Table,
   Text,
@@ -23,46 +18,23 @@ import {
   Title,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   IconAlertCircle,
-  IconBinaryTree2,
-  IconCircleCheck,
-  IconCopy,
+  IconArrowUpRight,
   IconDatabase,
-  IconFileInfo,
-  IconKey,
-  IconRoute2,
-  IconShieldLock,
-  IconSparkles,
+  IconDownload,
+  IconFile,
+  IconFolder,
+  IconHome2,
+  IconRefresh,
+  IconRoute,
+  IconUpload,
 } from '@tabler/icons-react'
-import {
-  ApiError,
-  type CollectionRecord,
-  getCollection,
-  getObject,
-  type ObjectRecord,
-} from '../lib/irods-rest'
+import { downloadPathUrl, getPath, getPathChildren } from '../lib/irods-rest'
+import { useSession } from '../providers/session'
 
-type ResourceKind = 'object' | 'collection'
-
-type ResourceResult =
-  | { kind: 'object'; data: ObjectRecord }
-  | { kind: 'collection'; data: CollectionRecord }
-
-const baseUrlStorageKey = 'irods-rest-console.base-url'
-const tokenStorageKey = 'irods-rest-console.token'
-
-function readStorage(key: string, fallback = '') {
-  return window.localStorage.getItem(key) ?? fallback
-}
-
-function formatBytes(size: number) {
-  return new Intl.NumberFormat('en-US', {
-    notation: size > 100_000 ? 'compact' : 'standard',
-    maximumFractionDigits: 1,
-  }).format(size)
-}
+const defaultPath = '/tempZone/home'
 
 function metadataRows(metadata?: Record<string, string>) {
   if (!metadata || Object.keys(metadata).length === 0) {
@@ -87,399 +59,526 @@ function metadataRows(metadata?: Record<string, string>) {
   ))
 }
 
-export function ExplorerPage() {
-  const [resourceKind, setResourceKind] = useState<ResourceKind>('object')
-  const [identifier, setIdentifier] = useState('demo-object')
-  const [token, setToken] = useState(() => readStorage(tokenStorageKey))
-  const [baseUrl, setBaseUrl] = useState(() => readStorage(baseUrlStorageKey))
+function pathSegments(path: string) {
+  const segments = path.split('/').filter(Boolean)
+  const crumbs = [{ label: '/', value: '/' }]
 
-  useEffect(() => {
-    window.localStorage.setItem(tokenStorageKey, token)
-  }, [token])
+  let current = ''
+  for (const segment of segments) {
+    current += `/${segment}`
+    crumbs.push({ label: segment, value: current })
+  }
 
-  useEffect(() => {
-    window.localStorage.setItem(baseUrlStorageKey, baseUrl)
-  }, [baseUrl])
+  return crumbs
+}
 
-  const placeholder = useMemo(
-    () => (resourceKind === 'object' ? 'demo-object' : 'demo-collection'),
-    [resourceKind],
-  )
+function displayName(path: string) {
+  if (path === '/') {
+    return '/'
+  }
 
-  const lookupMutation = useMutation<ResourceResult, ApiError, void>({
-    mutationFn: async () => {
-      const trimmedToken = token.trim()
-      const trimmedIdentifier = identifier.trim()
-      const trimmedBaseUrl = baseUrl.trim()
+  return path.split('/').filter(Boolean).at(-1) ?? path
+}
 
-      if (!trimmedToken) {
-        throw new ApiError(401, 'A bearer token is required for API calls.')
-      }
+function formatBytes(size?: number) {
+  if (size === undefined) {
+    return 'N/A'
+  }
 
-      if (!trimmedIdentifier) {
-        throw new ApiError(400, 'Enter an object or collection identifier.')
-      }
+  return new Intl.NumberFormat('en-US', {
+    notation: size > 100_000 ? 'compact' : 'standard',
+    maximumFractionDigits: 1,
+  }).format(size)
+}
 
-      if (resourceKind === 'object') {
-        const data = await getObject(trimmedIdentifier, trimmedToken, trimmedBaseUrl)
-        return { kind: 'object', data }
-      }
+function quickLocations(path: string) {
+  const segments = path.split('/').filter(Boolean)
+  const zoneRoot = segments[0] ? `/${segments[0]}` : '/tempZone'
+  const homePath = segments.length >= 2 ? `/${segments[0]}/${segments[1]}` : defaultPath
 
-      const data = await getCollection(
-        trimmedIdentifier,
-        trimmedToken,
-        trimmedBaseUrl,
-      )
-      return { kind: 'collection', data }
+  return [
+    {
+      label: 'Home',
+      description: 'Primary browser workspace',
+      path: defaultPath,
+      icon: IconHome2,
     },
-    onSuccess: (result) => {
+    {
+      label: 'Zone',
+      description: 'Top-level zone view',
+      path: zoneRoot,
+      icon: IconDatabase,
+    },
+    {
+      label: 'Current branch',
+      description: 'Resume this branch quickly',
+      path: homePath,
+      icon: IconRoute,
+    },
+  ]
+}
+
+export function ExplorerPage() {
+  const { connection } = useSession()
+  const [draftPath, setDraftPath] = useState(defaultPath)
+  const [selectedPath, setSelectedPath] = useState(defaultPath)
+  const [highlightedChildPath, setHighlightedChildPath] = useState<string | null>(null)
+
+  const openPath = (nextPath: string) => {
+    const normalized = nextPath.trim() || defaultPath
+    setDraftPath(normalized)
+    setSelectedPath(normalized)
+    setHighlightedChildPath(null)
+  }
+
+  const entryQuery = useQuery({
+    queryKey: ['path-entry', selectedPath, connection],
+    queryFn: () => getPath(selectedPath, connection.auth, connection.baseUrl),
+  })
+
+  const childrenQuery = useQuery({
+    queryKey: ['path-children', selectedPath, connection],
+    queryFn: () => getPathChildren(selectedPath, connection.auth, connection.baseUrl),
+    enabled: entryQuery.data?.kind === 'collection',
+  })
+
+  const refreshMutation = useMutation({
+    mutationFn: async () => {
+      const entry = await getPath(selectedPath, connection.auth, connection.baseUrl)
+      if (entry.kind === 'collection') {
+        await getPathChildren(selectedPath, connection.auth, connection.baseUrl)
+      }
+      return entry
+    },
+    onSuccess: (entry) => {
       notifications.show({
-        title: `${result.kind} loaded`,
-        message: result.data.path,
+        title: 'View refreshed',
+        message: entry.path,
         color: 'teal',
       })
+      void entryQuery.refetch()
+      void childrenQuery.refetch()
     },
-    onError: (error) => {
+    onError: (error: Error) => {
       notifications.show({
-        title: `Lookup failed (${error.status})`,
+        title: 'Refresh failed',
         message: error.message,
         color: 'red',
       })
     },
   })
 
-  const result = lookupMutation.data
+  const entry = entryQuery.data
+  const children = childrenQuery.data?.children ?? []
+  const breadcrumbs = pathSegments(selectedPath)
+  const locationOptions = quickLocations(selectedPath)
+  const highlightedChild =
+    children.find((child) => child.path === highlightedChildPath) ?? null
+  const detailEntry = entry?.kind === 'collection' ? highlightedChild ?? entry : entry
 
   return (
-    <Stack gap="xl">
+    <Stack gap="lg">
       <Paper className="hero-panel" radius="xl" p="xl">
         <Group justify="space-between" align="flex-start" gap="xl">
-          <Stack gap="sm">
+          <Stack gap="sm" maw={760}>
             <Badge variant="filled" color="dark">
-              iRODS data access
+              Explorer
             </Badge>
-            <Title order={1} maw={620}>
-              Search iRODS object and collection records through the
-              `irods-go-rest` API.
-            </Title>
-            <Text size="lg" c="dimmed" maw={760}>
-              This starter favors a clean operator console: direct bearer-token
-              auth, contract-aligned fetches, and a structure that can grow into
-              a fuller browser without rewrites.
+            <Title order={1}>A focused browser workspace for iRODS collections and objects.</Title>
+            <Text size="lg" c="dimmed">
+              The current UI is deliberately shaped like a file browser: navigation
+              on the left, the collection surface in the center, and selected item
+              details on the right.
             </Text>
           </Stack>
 
-          <SimpleGrid cols={1} spacing="sm" miw={240}>
-            <StatCard
-              icon={IconDatabase}
-              label="Backend"
-              value="irods-go-rest"
-              note="/api/v1/* over bearer auth"
-            />
-            <StatCard
-              icon={IconSparkles}
-              label="UI stack"
-              value="Mantine"
-              note="Polished primitives with minimal ceremony"
-            />
-          </SimpleGrid>
+          <Group gap="sm" align="stretch" className="explorer-hero-stats">
+            <MiniStat title="Current mode" value="Browse" note="Collections, objects, transfers" />
+            <MiniStat title="Contract" value="/api/v1/path" note="Path-first navigation" />
+          </Group>
         </Group>
       </Paper>
 
-      <Grid gap="lg">
-        <Grid.Col span={{ base: 12, md: 5 }}>
+      <div className="explorer-layout">
+        <Card shadow="sm" radius="xl" padding="lg" className="explorer-sidebar">
           <Stack gap="lg">
-            <Card shadow="sm" radius="xl" padding="lg">
-              <Stack gap="md">
-                <Group gap="sm">
-                  <ThemeIcon variant="light" color="cyan" size="lg">
-                    <IconRoute2 size={18} />
-                  </ThemeIcon>
-                  <div>
-                    <Title order={3}>Connection</Title>
-                    <Text size="sm" c="dimmed">
-                      Leave the base URL empty during local Vite development to
-                      use the built-in proxy to `http://localhost:8080`.
-                    </Text>
-                  </div>
-                </Group>
+            <div>
+              <Text size="xs" tt="uppercase" fw={700} c="dimmed">
+                Locations
+              </Text>
+              <Text size="sm" mt={4} c="dimmed">
+                Keep navigation concise and predictable.
+              </Text>
+            </div>
 
-                <TextInput
-                  label="API base URL"
-                  placeholder="Use dev proxy when blank"
-                  value={baseUrl}
-                  onChange={(event) => setBaseUrl(event.currentTarget.value)}
-                />
-
-                <PasswordInput
-                  label="Bearer token"
-                  placeholder="Paste a Keycloak access token"
-                  value={token}
-                  onChange={(event) => setToken(event.currentTarget.value)}
-                  leftSection={<IconShieldLock size={16} />}
-                />
-
-                <Alert
-                  variant="light"
-                  color="blue"
-                  icon={<IconKey size={16} />}
-                  title="Token source"
+            <Stack gap="xs">
+              {locationOptions.map((location) => (
+                <Button
+                  key={`${location.label}-${location.path}`}
+                  justify="flex-start"
+                  variant={selectedPath === location.path ? 'light' : 'subtle'}
+                  leftSection={<location.icon size={16} />}
+                  onClick={() => openPath(location.path)}
                 >
-                  The current API expects <Code>Authorization: Bearer</Code>.
-                  Use the backend&apos;s browser login flow at{' '}
-                  <Anchor href="/web/login" target="_blank">
-                    /web/login
-                  </Anchor>{' '}
-                  or pull a token from Keycloak directly.
-                </Alert>
-              </Stack>
-            </Card>
+                  <span>{location.label}</span>
+                </Button>
+              ))}
+            </Stack>
 
-            <Card shadow="sm" radius="xl" padding="lg">
-              <Stack gap="md">
-                <Group gap="sm">
-                  <ThemeIcon variant="light" color="teal" size="lg">
-                    <IconFileInfo size={18} />
-                  </ThemeIcon>
-                  <div>
-                    <Title order={3}>Lookup</Title>
-                    <Text size="sm" c="dimmed">
-                      Switch between object and collection metadata lookups.
-                    </Text>
-                  </div>
-                </Group>
+            <Divider />
 
-                <SegmentedControl
-                  fullWidth
-                  value={resourceKind}
-                  onChange={(value) => {
-                    startTransition(() => {
-                      const next = value as ResourceKind
-                      setResourceKind(next)
-                      setIdentifier(next === 'object' ? 'demo-object' : 'demo-collection')
-                    })
-                  }}
-                  data={[
-                    { label: 'Object', value: 'object' },
-                    { label: 'Collection', value: 'collection' },
-                  ]}
-                />
-
-                <TextInput
-                  label={`${resourceKind} identifier`}
-                  placeholder={placeholder}
-                  value={identifier}
-                  onChange={(event) => setIdentifier(event.currentTarget.value)}
-                />
-
-                <Group gap="sm">
-                  <Button
-                    onClick={() => lookupMutation.mutate()}
-                    loading={lookupMutation.isPending}
-                  >
-                    Run lookup
-                  </Button>
-                  <Button
-                    variant="default"
-                    onClick={() =>
-                      setIdentifier(
-                        resourceKind === 'object' ? 'demo-object' : 'demo-collection',
-                      )
-                    }
-                  >
-                    Use sample
-                  </Button>
-                </Group>
-              </Stack>
-            </Card>
+            <Stack gap="xs">
+              <Text size="xs" tt="uppercase" fw={700} c="dimmed">
+                Session
+              </Text>
+              <Badge variant="light" color="blue">
+                {connection.auth.mode === 'basic' ? 'Basic auth' : 'OIDC bearer'}
+              </Badge>
+              <Text size="sm" c="dimmed">
+                {connection.baseUrl || 'Using Vite proxy to localhost:8080'}
+              </Text>
+            </Stack>
           </Stack>
-        </Grid.Col>
+        </Card>
 
-        <Grid.Col span={{ base: 12, md: 7 }}>
-          <Card shadow="sm" radius="xl" padding="lg" mih={520}>
-            <Stack gap="lg">
-              <Group justify="space-between" align="flex-start">
-                <div>
-                  <Title order={3}>Result</Title>
-                  <Text size="sm" c="dimmed">
-                    Contract-aligned rendering for the current OpenAPI schema.
-                  </Text>
-                </div>
-                {result ? (
-                  <Badge variant="light" color="teal">
-                    {result.kind}
-                  </Badge>
-                ) : null}
-              </Group>
+        <Card shadow="sm" radius="xl" padding="lg" className="explorer-main">
+          <Stack gap="md">
+            <Group justify="space-between" align="center">
+              <div>
+                <Title order={3}>Files</Title>
+                <Text size="sm" c="dimmed">
+                  Browse a collection, select an item, and keep detail work off to the side.
+                </Text>
+              </div>
 
-              {lookupMutation.isIdle ? (
-                <EmptyState />
-              ) : null}
-
-              {lookupMutation.isError ? (
-                <Alert
-                  color="red"
+              <Group gap="sm">
+                <Button leftSection={<IconUpload size={16} />} variant="default">
+                  Upload
+                </Button>
+                <Button
+                  leftSection={<IconRefresh size={16} />}
                   variant="light"
-                  icon={<IconAlertCircle size={18} />}
-                  title="Request error"
+                  onClick={() => refreshMutation.mutate()}
+                  loading={refreshMutation.isPending}
                 >
-                  {lookupMutation.error.message}
-                </Alert>
-              ) : null}
+                  Refresh
+                </Button>
+              </Group>
+            </Group>
 
-              {result ? (
-                <Stack gap="lg">
-                  <Paper withBorder radius="lg" p="md">
-                    <Group justify="space-between" align="flex-start">
+            <div className="explorer-toolbar">
+              <TextInput
+                label="Open iRODS path"
+                placeholder={defaultPath}
+                value={draftPath}
+                onChange={(event) => setDraftPath(event.currentTarget.value)}
+                style={{ flex: 1 }}
+              />
+              <Button onClick={() => openPath(draftPath)}>Open</Button>
+            </div>
+
+            <Breadcrumbs>
+              {breadcrumbs.map((crumb) => (
+                <Button
+                  key={crumb.value}
+                  variant="subtle"
+                  size="xs"
+                  onClick={() => openPath(crumb.value)}
+                >
+                  {crumb.label}
+                </Button>
+              ))}
+            </Breadcrumbs>
+
+            {entryQuery.isLoading ? (
+              <Group justify="center" py="xl">
+                <Loader />
+              </Group>
+            ) : null}
+
+            {entryQuery.isError ? (
+              <Alert
+                color="red"
+                variant="light"
+                icon={<IconAlertCircle size={18} />}
+                title="Unable to load path"
+              >
+                {entryQuery.error.message}
+              </Alert>
+            ) : null}
+
+            {entry ? (
+              <Stack gap="md">
+                <Paper withBorder radius="lg" p="md">
+                  <Group justify="space-between" align="flex-start">
+                    <Group gap="sm" align="flex-start">
+                      <ThemeIcon
+                        variant="light"
+                        color={entry.kind === 'collection' ? 'blue' : 'teal'}
+                        size="lg"
+                      >
+                        {entry.kind === 'collection' ? (
+                          <IconFolder size={18} />
+                        ) : (
+                          <IconFile size={18} />
+                        )}
+                      </ThemeIcon>
                       <div>
-                        <Group gap="xs">
-                          <Title order={4}>{result.data.id}</Title>
-                          <CopyButton value={result.data.path}>
-                            {({ copied, copy }) => (
-                              <ActionIcon
-                                variant="subtle"
-                                color={copied ? 'teal' : 'gray'}
-                                onClick={copy}
-                              >
-                                {copied ? (
-                                  <IconCircleCheck size={16} />
-                                ) : (
-                                  <IconCopy size={16} />
-                                )}
-                              </ActionIcon>
-                            )}
-                          </CopyButton>
-                        </Group>
-                        <Text c="dimmed">{result.data.path}</Text>
+                        <Text fw={700}>{entry.path}</Text>
+                        <Text size="sm" c="dimmed">
+                          {entry.kind === 'collection'
+                            ? 'Collection listing'
+                            : 'Object detail surface'}
+                        </Text>
                       </div>
-                      <Badge variant="dot" color="blue">
-                        zone {result.data.zone}
+                    </Group>
+
+                    <Group gap="xs">
+                      <Badge variant="light" color="blue">
+                        {entry.kind}
+                      </Badge>
+                      <Badge variant="dot" color="gray">
+                        {entry.zone}
                       </Badge>
                     </Group>
-                  </Paper>
+                  </Group>
+                </Paper>
 
-                  <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
-                    <InfoCard
-                      label="Path"
-                      value={result.data.path}
-                      icon={IconRoute2}
-                    />
-                    <InfoCard
-                      label="Zone"
-                      value={result.data.zone}
-                      icon={IconBinaryTree2}
-                    />
-                    {result.kind === 'object' ? (
-                      <>
-                        <InfoCard
-                          label="Checksum"
-                          value={result.data.checksum}
-                          icon={IconShieldLock}
-                        />
-                        <InfoCard
-                          label="Size"
-                          value={`${result.data.size} bytes (${formatBytes(result.data.size)})`}
-                          icon={IconDatabase}
-                        />
-                      </>
-                    ) : (
-                      <InfoCard
-                        label="Children"
-                        value={`${result.data.childCount ?? 0}`}
-                        icon={IconDatabase}
-                      />
-                    )}
-                  </SimpleGrid>
-
-                  <Divider label="Metadata" labelPosition="left" />
-
-                  <Table highlightOnHover>
+                {entry.kind === 'collection' ? (
+                  <Table highlightOnHover verticalSpacing="sm">
                     <Table.Thead>
                       <Table.Tr>
-                        <Table.Th>Attribute</Table.Th>
-                        <Table.Th>Value</Table.Th>
+                        <Table.Th>Name</Table.Th>
+                        <Table.Th>Kind</Table.Th>
+                        <Table.Th>Children</Table.Th>
+                        <Table.Th>Zone</Table.Th>
+                        <Table.Th>Actions</Table.Th>
                       </Table.Tr>
                     </Table.Thead>
-                    <Table.Tbody>{metadataRows(result.data.metadata)}</Table.Tbody>
+                    <Table.Tbody>
+                      {children.map((child) => {
+                        const isSelected = child.path === highlightedChildPath
+
+                        return (
+                          <Table.Tr
+                            key={child.path}
+                            className={isSelected ? 'explorer-row-selected' : undefined}
+                            onClick={() => setHighlightedChildPath(child.path)}
+                          >
+                            <Table.Td>
+                              <Group gap="sm" wrap="nowrap">
+                                <ThemeIcon
+                                  size="md"
+                                  variant="light"
+                                  color={child.kind === 'collection' ? 'blue' : 'teal'}
+                                >
+                                  {child.kind === 'collection' ? (
+                                    <IconFolder size={14} />
+                                  ) : (
+                                    <IconFile size={14} />
+                                  )}
+                                </ThemeIcon>
+                                <div>
+                                  <Text fw={600}>{displayName(child.path)}</Text>
+                                  <Text size="xs" c="dimmed">
+                                    {child.path}
+                                  </Text>
+                                </div>
+                              </Group>
+                            </Table.Td>
+                            <Table.Td>{child.kind}</Table.Td>
+                            <Table.Td>{child.childCount ?? '—'}</Table.Td>
+                            <Table.Td>{child.zone}</Table.Td>
+                            <Table.Td>
+                              <Group gap="xs">
+                                <Button
+                                  size="xs"
+                                  variant="subtle"
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    openPath(child.path)
+                                  }}
+                                >
+                                  Open
+                                </Button>
+                                {child.kind === 'data_object' ? (
+                                  <DownloadButton path={child.path} />
+                                ) : null}
+                              </Group>
+                            </Table.Td>
+                          </Table.Tr>
+                        )
+                      })}
+                      {!children.length && !childrenQuery.isLoading ? (
+                        <Table.Tr>
+                          <Table.Td colSpan={5}>
+                            <Text size="sm" c="dimmed">
+                              Empty collection or child listing not yet available.
+                            </Text>
+                          </Table.Td>
+                        </Table.Tr>
+                      ) : null}
+                    </Table.Tbody>
                   </Table>
+                ) : (
+                  <Paper withBorder radius="lg" p="md">
+                    <Group gap="sm">
+                      <DownloadButton path={entry.path} />
+                      <Button variant="default">Replace object</Button>
+                    </Group>
+                  </Paper>
+                )}
+              </Stack>
+            ) : null}
+          </Stack>
+        </Card>
+
+        <Card shadow="sm" radius="xl" padding="lg" className="explorer-details">
+          <Stack gap="md">
+            <div>
+              <Text size="xs" tt="uppercase" fw={700} c="dimmed">
+                Details
+              </Text>
+              <Text size="sm" c="dimmed" mt={4}>
+                Selection details stay separate from the listing so the browser remains readable.
+              </Text>
+            </div>
+
+            {detailEntry ? (
+              <>
+                <Paper withBorder radius="lg" p="md">
+                  <Group gap="sm" align="flex-start">
+                    <ThemeIcon
+                      variant="light"
+                      color={detailEntry.kind === 'collection' ? 'blue' : 'teal'}
+                      size="lg"
+                    >
+                      {detailEntry.kind === 'collection' ? (
+                        <IconFolder size={18} />
+                      ) : (
+                        <IconFile size={18} />
+                      )}
+                    </ThemeIcon>
+                    <div>
+                      <Text fw={700}>{displayName(detailEntry.path)}</Text>
+                      <Text size="sm" c="dimmed">
+                        {detailEntry.path}
+                      </Text>
+                    </div>
+                  </Group>
+                </Paper>
+
+                <Stack gap="xs">
+                  <InfoRow label="Kind" value={detailEntry.kind} />
+                  <InfoRow label="Zone" value={detailEntry.zone} />
+                  <InfoRow label="Identifier" value={detailEntry.id} />
+                  <InfoRow
+                    label="Children"
+                    value={`${detailEntry.childCount ?? (detailEntry.kind === 'collection' ? children.length : 0)}`}
+                  />
+                  <InfoRow label="Size" value={formatBytes(detailEntry.size)} />
+                  <InfoRow label="Checksum" value={detailEntry.checksum ?? 'N/A'} />
                 </Stack>
-              ) : null}
-            </Stack>
-          </Card>
-        </Grid.Col>
-      </Grid>
+
+                <Divider label="Metadata" labelPosition="left" />
+
+                <Table verticalSpacing="xs">
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Attribute</Table.Th>
+                      <Table.Th>Value</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>{metadataRows(detailEntry.metadata)}</Table.Tbody>
+                </Table>
+
+                <Divider label="Actions" labelPosition="left" />
+
+                <Stack gap="xs">
+                  {detailEntry.kind === 'data_object' ? (
+                    <DownloadButton path={detailEntry.path} />
+                  ) : (
+                    <Button
+                      variant="light"
+                      leftSection={<IconArrowUpRight size={14} />}
+                      onClick={() => openPath(detailEntry.path)}
+                    >
+                      Open collection
+                    </Button>
+                  )}
+                  <Button variant="default" leftSection={<IconUpload size={14} />}>
+                    {detailEntry.kind === 'data_object' ? 'Replace object' : 'Upload into collection'}
+                  </Button>
+                </Stack>
+              </>
+            ) : (
+              <Alert variant="light" color="blue" title="Nothing selected">
+                Open a path or choose an item in the current collection to inspect it here.
+              </Alert>
+            )}
+          </Stack>
+        </Card>
+      </div>
     </Stack>
   )
 }
 
-function EmptyState() {
+function DownloadButton({ path }: { path: string }) {
+  const { connection } = useSession()
+  const isBasic = connection.auth.mode === 'basic'
+
+  if (isBasic) {
+    return (
+      <Button size="xs" variant="light" leftSection={<IconDownload size={14} />} disabled>
+        Download requires browser/header flow
+      </Button>
+    )
+  }
+
   return (
-    <Stack align="center" justify="center" mih={360} gap="sm">
-      <ThemeIcon size={64} radius="xl" variant="light" color="cyan">
-        <IconFileInfo size={32} />
-      </ThemeIcon>
-      <Title order={4}>No lookup yet</Title>
-      <Text c="dimmed" ta="center" maw={420}>
-        Enter a token, choose a resource type, and query a record from the
-        running `irods-go-rest` service.
-      </Text>
-    </Stack>
+    <Button
+      component="a"
+      href={downloadPathUrl(path, connection.baseUrl)}
+      size="xs"
+      variant="light"
+      leftSection={<IconDownload size={14} />}
+    >
+      Download
+    </Button>
   )
 }
 
-function StatCard({
-  icon: Icon,
-  label,
+function MiniStat({
+  title,
   value,
   note,
 }: {
-  icon: typeof IconDatabase
-  label: string
+  title: string
   value: string
   note: string
 }) {
   return (
     <Paper withBorder radius="lg" p="md">
-      <Group wrap="nowrap" align="flex-start">
-        <ThemeIcon size="lg" variant="light" color="dark">
-          <Icon size={18} />
-        </ThemeIcon>
-        <div>
-          <Text size="xs" tt="uppercase" c="dimmed">
-            {label}
-          </Text>
-          <Text fw={700}>{value}</Text>
-          <Text size="sm" c="dimmed">
-            {note}
-          </Text>
-        </div>
-      </Group>
+      <Text size="sm" c="dimmed">
+        {title}
+      </Text>
+      <Text fw={700}>{value}</Text>
+      <Text size="sm" c="dimmed">
+        {note}
+      </Text>
     </Paper>
   )
 }
 
-function InfoCard({
-  label,
-  value,
-  icon: Icon,
-}: {
-  label: string
-  value: string
-  icon: typeof IconDatabase
-}) {
+function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <Paper withBorder radius="lg" p="md">
-      <Group gap="sm" align="flex-start">
-        <ThemeIcon variant="light" color="cyan">
-          <Icon size={16} />
-        </ThemeIcon>
-        <div>
-          <Text size="xs" tt="uppercase" c="dimmed">
-            {label}
-          </Text>
-          <Text fw={600}>{value}</Text>
-        </div>
-      </Group>
-    </Paper>
+    <Group justify="space-between" align="flex-start">
+      <Text size="sm" c="dimmed">
+        {label}
+      </Text>
+      <Text size="sm" fw={600} maw={180} ta="right">
+        {value}
+      </Text>
+    </Group>
   )
 }

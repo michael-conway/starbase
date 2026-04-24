@@ -6,27 +6,42 @@ export interface HealthResponse {
   description?: string
 }
 
-export interface ObjectRecord {
+export interface ParentLink {
+  irods_path: string
+  href: string
+}
+
+export interface PathEntry {
   id: string
   path: string
-  checksum: string
-  size: number
+  kind: 'data_object' | 'collection'
   zone: string
+  parent?: ParentLink
+  hasChildren?: boolean
+  childCount?: number
+  checksum?: string
+  size?: number
   resource?: string
   metadata?: Record<string, string>
 }
 
-export interface CollectionRecord {
-  id: string
-  path: string
-  zone: string
-  childCount?: number
-  metadata?: Record<string, string>
+export interface PathChildrenResponse {
+  irods_path: string
+  children: PathEntry[]
 }
 
 export interface ApiErrorPayload {
   code: string
   message: string
+}
+
+export type AuthMode = 'basic' | 'oidc'
+
+export interface RequestAuth {
+  mode: AuthMode
+  username?: string
+  password?: string
+  token?: string
 }
 
 export class ApiError extends Error {
@@ -53,13 +68,37 @@ function buildUrl(path: string, baseUrl?: string) {
   return resolvedBaseUrl ? `${resolvedBaseUrl}${path}` : path
 }
 
-async function request<T>(path: string, token?: string, baseUrl?: string): Promise<T> {
-  const response = await fetch(buildUrl(path, baseUrl), {
-    headers: token
-      ? {
-          Authorization: `Bearer ${token}`,
-        }
-      : undefined,
+function encodeBasicCredentials(username: string, password: string) {
+  return btoa(`${username}:${password}`)
+}
+
+function buildHeaders(auth?: RequestAuth) {
+  if (!auth) {
+    return undefined
+  }
+
+  if (auth.mode === 'basic') {
+    return {
+      Authorization: `Basic ${encodeBasicCredentials(auth.username ?? '', auth.password ?? '')}`,
+    }
+  }
+
+  return auth.token
+    ? {
+        Authorization: `Bearer ${auth.token}`,
+      }
+    : undefined
+}
+
+async function request<T>(
+  path: string,
+  options?: {
+    auth?: RequestAuth
+    baseUrl?: string
+  },
+): Promise<T> {
+  const response = await fetch(buildUrl(path, options?.baseUrl), {
+    headers: buildHeaders(options?.auth),
   })
 
   if (!response.ok) {
@@ -81,26 +120,32 @@ async function request<T>(path: string, token?: string, baseUrl?: string): Promi
   return (await response.json()) as T
 }
 
+function withPath(path: string) {
+  return `?irods_path=${encodeURIComponent(path)}`
+}
+
 export function getHealth(baseUrl?: string) {
-  return request<HealthResponse>('/healthz', undefined, baseUrl)
+  return request<HealthResponse>('/healthz', { baseUrl })
 }
 
-export function getObject(objectId: string, token: string, baseUrl?: string) {
-  return request<ObjectRecord>(
-    `/api/v1/objects/${encodeURIComponent(objectId)}`,
-    token,
+export function getPath(irodsPath: string, auth: RequestAuth, baseUrl?: string) {
+  return request<PathEntry>(`/api/v1/path${withPath(irodsPath)}`, {
+    auth,
     baseUrl,
-  )
+  })
 }
 
-export function getCollection(
-  collectionId: string,
-  token: string,
+export function getPathChildren(
+  irodsPath: string,
+  auth: RequestAuth,
   baseUrl?: string,
 ) {
-  return request<CollectionRecord>(
-    `/api/v1/collections/${encodeURIComponent(collectionId)}`,
-    token,
+  return request<PathChildrenResponse>(`/api/v1/path/children${withPath(irodsPath)}`, {
+    auth,
     baseUrl,
-  )
+  })
+}
+
+export function downloadPathUrl(irodsPath: string, baseUrl?: string) {
+  return buildUrl(`/api/v1/path/contents${withPath(irodsPath)}`, baseUrl)
 }

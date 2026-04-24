@@ -4,8 +4,10 @@ import test from 'node:test'
 const integrationEnabledEnvVar = 'STARBASE_INTEGRATION'
 const baseUrlEnvVar = 'STARBASE_TEST_BASE_URL'
 const tokenEnvVar = 'STARBASE_TEST_BEARER_TOKEN'
-const objectIdEnvVar = 'STARBASE_TEST_OBJECT_ID'
-const collectionIdEnvVar = 'STARBASE_TEST_COLLECTION_ID'
+const basicUserEnvVar = 'STARBASE_TEST_BASIC_USERNAME'
+const basicPasswordEnvVar = 'STARBASE_TEST_BASIC_PASSWORD'
+const pathEnvVar = 'STARBASE_TEST_IRODS_PATH'
+const collectionPathEnvVar = 'STARBASE_TEST_COLLECTION_PATH'
 
 function envValue(name) {
   return process.env[name]?.trim() ?? ''
@@ -19,20 +21,32 @@ function integrationBaseUrl() {
   return (envValue(baseUrlEnvVar) || 'http://localhost:8080').replace(/\/$/, '')
 }
 
-function hasRequiredObjectLookupEnv() {
-  return Boolean(envValue(tokenEnvVar) && envValue(objectIdEnvVar))
+function authorizationHeader() {
+  if (envValue(tokenEnvVar)) {
+    return `Bearer ${envValue(tokenEnvVar)}`
+  }
+
+  if (envValue(basicUserEnvVar) && envValue(basicPasswordEnvVar)) {
+    const credentials = Buffer.from(
+      `${envValue(basicUserEnvVar)}:${envValue(basicPasswordEnvVar)}`,
+    ).toString('base64')
+    return `Basic ${credentials}`
+  }
+
+  return ''
 }
 
-function hasRequiredCollectionLookupEnv() {
-  return Boolean(envValue(tokenEnvVar) && envValue(collectionIdEnvVar))
+function hasProtectedAuthEnv() {
+  return Boolean(authorizationHeader())
 }
 
-async function requestJson(path, token) {
+async function requestJson(path) {
+  const auth = authorizationHeader()
   const response = await fetch(`${integrationBaseUrl()}${path}`, {
-    headers: token
+    headers: auth
       ? {
           Accept: 'application/json',
-          Authorization: `Bearer ${token}`,
+          Authorization: auth,
         }
       : {
           Accept: 'application/json',
@@ -63,48 +77,50 @@ test('health endpoint responds for a running irods-go-rest service', {
   assert.equal(typeof payload.service, 'string')
 })
 
-test('object lookup returns the record shape expected by starbase', {
-  skip: !isIntegrationEnabled() || !hasRequiredObjectLookupEnv(),
+test('path lookup returns the record shape expected by starbase', {
+  skip: !isIntegrationEnabled() || !hasProtectedAuthEnv() || !envValue(pathEnvVar),
 }, async () => {
   const { response, payload } = await requestJson(
-    `/api/v1/objects/${encodeURIComponent(envValue(objectIdEnvVar))}`,
-    envValue(tokenEnvVar),
+    `/api/v1/path?irods_path=${encodeURIComponent(envValue(pathEnvVar))}`,
   )
 
   assert.equal(
     response.status,
     200,
-    `expected 200 from object lookup, got ${response.status}: ${JSON.stringify(payload)}`,
+    `expected 200 from path lookup, got ${response.status}: ${JSON.stringify(payload)}`,
   )
   assert.equal(typeof payload, 'object')
   assert.ok(payload)
-  assert.equal(payload.id, envValue(objectIdEnvVar))
-  assert.equal(typeof payload.path, 'string')
+  assert.equal(payload.path, envValue(pathEnvVar))
+  assert.equal(typeof payload.id, 'string')
+  assert.equal(typeof payload.kind, 'string')
   assert.equal(typeof payload.zone, 'string')
-  assert.equal(typeof payload.checksum, 'string')
-  assert.equal(typeof payload.size, 'number')
 })
 
-test('collection lookup returns the record shape expected by starbase', {
-  skip: !isIntegrationEnabled() || !hasRequiredCollectionLookupEnv(),
+test('collection child listing returns the shape expected by starbase', {
+  skip:
+    !isIntegrationEnabled() ||
+    !hasProtectedAuthEnv() ||
+    !envValue(collectionPathEnvVar),
 }, async () => {
   const { response, payload } = await requestJson(
-    `/api/v1/collections/${encodeURIComponent(envValue(collectionIdEnvVar))}`,
-    envValue(tokenEnvVar),
+    `/api/v1/path/children?irods_path=${encodeURIComponent(envValue(collectionPathEnvVar))}`,
   )
 
   assert.equal(
     response.status,
     200,
-    `expected 200 from collection lookup, got ${response.status}: ${JSON.stringify(payload)}`,
+    `expected 200 from child listing, got ${response.status}: ${JSON.stringify(payload)}`,
   )
   assert.equal(typeof payload, 'object')
   assert.ok(payload)
-  assert.equal(payload.id, envValue(collectionIdEnvVar))
-  assert.equal(typeof payload.path, 'string')
-  assert.equal(typeof payload.zone, 'string')
+  assert.equal(payload.irods_path, envValue(collectionPathEnvVar))
+  assert.ok(Array.isArray(payload.children))
 
-  if (payload.childCount !== undefined) {
-    assert.equal(typeof payload.childCount, 'number')
+  for (const child of payload.children) {
+    assert.equal(typeof child.id, 'string')
+    assert.equal(typeof child.path, 'string')
+    assert.equal(typeof child.kind, 'string')
+    assert.equal(typeof child.zone, 'string')
   }
 })

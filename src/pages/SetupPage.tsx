@@ -16,9 +16,10 @@ export function SetupPage() {
     <Stack gap="lg">
       <div>
         <Title order={1}>Setup notes</Title>
-        <Text c="dimmed" maw={720}>
-          This frontend is intentionally thin. It assumes `irods-go-rest` owns
-          authentication, OpenAPI, and the iRODS integration boundary.
+        <Text c="dimmed" maw={760}>
+          This starter keeps frontend concerns explicit: login experience,
+          section-level navigation, and explorer workflows live here, while
+          `irods-go-rest` remains the auth and iRODS integration boundary.
         </Text>
       </div>
 
@@ -38,12 +39,8 @@ export function SetupPage() {
                   Leave the API base URL blank to use the Vite dev proxy.
                 </List.Item>
                 <List.Item>
-                  The default proxy expects the backend on{' '}
-                  <Code>http://localhost:8080</Code>.
-                </List.Item>
-                <List.Item>
                   Open <Code>/swagger</Code> or <Code>/openapi.yaml</Code> to
-                  inspect the backend contract.
+                  verify the current backend contract.
                 </List.Item>
               </List>
             </Stack>
@@ -53,21 +50,20 @@ export function SetupPage() {
         <Grid.Col span={{ base: 12, md: 6 }}>
           <Card radius="xl" shadow="sm" padding="lg">
             <Stack gap="sm">
-              <Title order={3}>Environment</Title>
+              <Title order={3}>Auth modes</Title>
               <List spacing="xs">
                 <List.Item>
-                  <Code>VITE_PROXY_TARGET</Code> controls the dev proxy target.
+                  Basic auth is supported directly by `irods-go-rest`.
                 </List.Item>
                 <List.Item>
-                  <Code>VITE_API_BASE_URL</Code> can pin the API origin for
-                  built deployments.
+                  OIDC uses the backend browser flow under <Code>/web/login</Code>.
                 </List.Item>
                 <List.Item>
-                  Protected API routes still require a bearer token.
+                  The starter treats auth selection as a first-class entry point.
                 </List.Item>
                 <List.Item>
-                  If `irods-go-rest` runs on another published port, set the
-                  base URL here instead of relying on the proxy.
+                  Future backend session APIs can replace the current manual
+                  token handoff without changing the overall shell.
                 </List.Item>
               </List>
             </Stack>
@@ -77,18 +73,20 @@ export function SetupPage() {
         <Grid.Col span={{ base: 12, md: 6 }}>
           <Card radius="xl" shadow="sm" padding="lg">
             <Stack gap="sm">
-              <Title order={3}>Companion repos</Title>
+              <Title order={3}>Major sections</Title>
               <List spacing="xs">
                 <List.Item>
-                  <Code>../irods-go-rest</Code> is the backend this UI targets.
+                  Explorer is the primary file and collection workspace.
                 </List.Item>
                 <List.Item>
-                  <Code>../irods-go-drs</Code> is the reference for integration
-                  test structure and docker-backed local workflow.
+                  Search is a separate top-level surface, not an explorer overlay.
                 </List.Item>
                 <List.Item>
-                  Keep auth, OpenAPI, and iRODS behavior aligned to the backend
-                  contract rather than duplicating it here.
+                  Rules and administration keep their own route spaces.
+                </List.Item>
+                <List.Item>
+                  Additional major tools can be added beside these sections with
+                  no shell rewrite.
                 </List.Item>
               </List>
             </Stack>
@@ -106,12 +104,11 @@ export function SetupPage() {
                   as the local integration environment.
                 </List.Item>
                 <List.Item>
-                  Start it with <Code>docker compose build</Code> and{' '}
-                  <Code>docker compose up</Code> from that directory.
+                  That stack includes PostgreSQL, iRODS provider, and Keycloak.
                 </List.Item>
                 <List.Item>
-                  That stack provides PostgreSQL, `irods-provider`, and
-                  Keycloak for end-to-end development.
+                  Keycloak is exposed by the compose stack and is intended for the
+                  OIDC browser flow.
                 </List.Item>
               </List>
             </Stack>
@@ -125,21 +122,16 @@ export function SetupPage() {
         icon={<IconInfoCircle size={18} />}
         title="Backend expectations"
       >
-        The current `irods-go-rest` contract exposes `GET /healthz`,
-        `GET /api/v1/objects/{'{object_id}'}`, and
-        `GET /api/v1/collections/{'{collection_id}'}`. Browser login is handled
-        separately under <Code>/web/login</Code>. Integration tests should use
-        the docker stack under{' '}
-        <Code>deployments/docker-test-framework/5-0</Code> and follow the
-        environment-gated pattern already used in `irods-go-drs`. See the
-        backend README in{' '}
+        The current `irods-go-rest` contract is path-first: <Code>GET /api/v1/path</Code>,{' '}
+        <Code>GET /api/v1/path/children</Code>, and{' '}
+        <Code>GET /api/v1/path/contents</Code>. See the sibling repo docs in{' '}
         <Anchor
           href="https://github.com/michael-conway/irods-go-rest"
           target="_blank"
         >
           project docs
         </Anchor>{' '}
-        if you want to align deployment env vars.
+        when updating auth or deployment assumptions.
       </Alert>
     </Stack>
   )
