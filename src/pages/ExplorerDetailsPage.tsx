@@ -66,6 +66,15 @@ export function ExplorerDetailsPage() {
   })
 
   const breadcrumbs = useMemo(() => detailsQuery.data?.path_segments ?? [], [detailsQuery.data])
+  const backPath = useMemo(() => {
+    if (!detailsQuery.data) {
+      return ''
+    }
+
+    return detailsQuery.data.kind === 'collection'
+      ? detailsQuery.data.path
+      : (detailsQuery.data.parent?.irods_path ?? '')
+  }, [detailsQuery.data])
 
   if (!irodsPath) {
     return (
@@ -81,13 +90,22 @@ export function ExplorerDetailsPage() {
         <Stack gap="md">
           <Group justify="space-between" align="center">
             <div>
-              <Title order={2}>Details</Title>
+              <Title order={2}>
+                {detailsQuery.data?.kind === 'collection' ? 'Folder details' : 'File details'}
+              </Title>
             </div>
 
             <Button
               variant="subtle"
               leftSection={<IconArrowLeft size={16} />}
-              onClick={() => navigate(-1)}
+              onClick={() => {
+                if (backPath) {
+                  navigate(`/app/explorer?irods_path=${encodeURIComponent(backPath)}`)
+                  return
+                }
+
+                navigate('/app/explorer')
+              }}
             >
               Back to explorer
             </Button>
@@ -143,7 +161,9 @@ export function ExplorerDetailsPage() {
                     </ThemeIcon>
                     <div>
                       <Title order={3}>{displayName(detailsQuery.data.path)}</Title>
-                      <Text c="dimmed">{detailsQuery.data.path}</Text>
+                      <Text c="dimmed">
+                        {detailsQuery.data.parent?.irods_path ?? 'Path root'}
+                      </Text>
                     </div>
                   </Group>
 
@@ -186,6 +206,18 @@ export function ExplorerDetailsPage() {
                     <Button variant="default" leftSection={<IconUpload size={14} />}>
                       Replace object
                     </Button>
+                    {detailsQuery.data.kind === 'collection' ? (
+                      <Button
+                        variant="light"
+                        onClick={() =>
+                          navigate(
+                            `/app/explorer?irods_path=${encodeURIComponent(detailsQuery.data.path)}`,
+                          )
+                        }
+                      >
+                        Open collection
+                      </Button>
+                    ) : null}
                     {detailsQuery.data.parent ? (
                       <Button
                         variant="light"

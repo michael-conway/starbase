@@ -6,12 +6,15 @@ import {
   Breadcrumbs,
   Button,
   Card,
+  Checkbox,
   Group,
   Loader,
   Stack,
   Table,
   Text,
   TextInput,
+  Anchor,
+  ActionIcon,
   ThemeIcon,
   Title,
 } from '@mantine/core'
@@ -20,37 +23,32 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   IconAlertCircle,
   IconDatabase,
+  IconDots,
   IconFile,
   IconFolder,
   IconHome2,
   IconRefresh,
-  IconRoute,
   IconUpload,
 } from '@tabler/icons-react'
-import { defaultPath, displayName } from '../features/explorer'
+import { displayName, formatDateTime, homePathForUser } from '../features/explorer'
 import { ApiError, getPath, getPathChildren } from '../lib/irods-rest'
 import { useSession } from '../providers/session'
 
-function quickLocations(path: string) {
+function quickLocations(path: string, username?: string) {
   const segments = path.split('/').filter(Boolean)
   const zoneRoot = segments[0] ? `/${segments[0]}` : '/tempZone'
-  const homePath = segments.length >= 2 ? `/${segments[0]}/${segments[1]}` : defaultPath
+  const homePath = homePathForUser(username, path)
 
   return [
     {
       label: 'Home',
-      path: defaultPath,
+      path: homePath,
       icon: IconHome2,
     },
     {
       label: 'Zone',
       path: zoneRoot,
       icon: IconDatabase,
-    },
-    {
-      label: 'Current branch',
-      path: homePath,
-      icon: IconRoute,
     },
   ]
 }
@@ -70,27 +68,30 @@ function listingErrorDetails(error: Error) {
 }
 
 export function ExplorerPage() {
-  const { connection } = useSession()
+  const { basicUsername, connection } = useSession()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const initialPath = searchParams.get('irods_path')?.trim() || defaultPath
+  const userHomePath = homePathForUser(basicUsername)
+  const initialPath = searchParams.get('irods_path')?.trim() || userHomePath
   const [draftPath, setDraftPath] = useState(initialPath)
   const [selectedPath, setSelectedPath] = useState(initialPath)
+  const [selectedChildren, setSelectedChildren] = useState<string[]>([])
 
   useEffect(() => {
     setDraftPath(initialPath)
     setSelectedPath(initialPath)
+    setSelectedChildren([])
   }, [initialPath])
 
   const openCollection = (nextPath: string) => {
-    const normalized = nextPath.trim() || defaultPath
+    const normalized = nextPath.trim() || userHomePath
     setDraftPath(normalized)
     setSelectedPath(normalized)
-    setSearchParams(normalized === defaultPath ? {} : { irods_path: normalized })
+    setSearchParams(normalized === userHomePath ? {} : { irods_path: normalized })
   }
 
   const openPath = async (nextPath: string) => {
-    const normalized = nextPath.trim() || defaultPath
+    const normalized = nextPath.trim() || userHomePath
 
     try {
       const entry = await getPath(normalized, connection.auth, connection.baseUrl)
@@ -109,6 +110,11 @@ export function ExplorerPage() {
         color: 'red',
       })
     }
+  }
+
+  const openDetails = (nextPath: string) => {
+    const normalized = nextPath.trim() || userHomePath
+    navigate(`/app/explorer/details?irods_path=${encodeURIComponent(normalized)}`)
   }
 
   const entryQuery = useQuery({
@@ -154,8 +160,23 @@ export function ExplorerPage() {
     childrenQuery.data?.irods_path === selectedPath ? childrenQuery.data : undefined
   const children = childrenResponse?.children ?? []
   const breadcrumbs = childrenResponse?.path_segments ?? entry?.path_segments ?? []
-  const locationOptions = quickLocations(selectedPath)
+  const locationOptions = quickLocations(selectedPath, basicUsername)
   const listingError = childrenQuery.isError ? listingErrorDetails(childrenQuery.error) : null
+  const allChildrenSelected = children.length > 0 && selectedChildren.length === children.length
+  const someChildrenSelected =
+    selectedChildren.length > 0 && selectedChildren.length < children.length
+
+  const toggleChildSelection = (childPath: string) => {
+    setSelectedChildren((current) =>
+      current.includes(childPath)
+        ? current.filter((path) => path !== childPath)
+        : [...current, childPath],
+    )
+  }
+
+  const toggleAllChildren = () => {
+    setSelectedChildren(allChildrenSelected ? [] : children.map((child) => child.path))
+  }
 
   return (
     <div className="explorer-layout">
@@ -194,9 +215,6 @@ export function ExplorerPage() {
                 <Badge variant="light" color="blue">
                   {entry.kind}
                 </Badge>
-                <Badge variant="dot" color="gray">
-                  {entry.zone}
-                </Badge>
               </Group>
             ) : null}
           </Group>
@@ -227,7 +245,7 @@ export function ExplorerPage() {
               Refresh
             </Button>
             <TextInput
-              placeholder={defaultPath}
+              placeholder={userHomePath}
               value={draftPath}
               onChange={(event) => setDraftPath(event.currentTarget.value)}
               className="explorer-path-input"
@@ -256,17 +274,28 @@ export function ExplorerPage() {
             <Table highlightOnHover verticalSpacing="sm">
               <Table.Thead>
                 <Table.Tr>
+                  <Table.Th w={52}>
+                    <Checkbox
+                      aria-label="Select all items"
+                      checked={allChildrenSelected}
+                      indeterminate={someChildrenSelected}
+                      onChange={toggleAllChildren}
+                      disabled={!children.length}
+                    />
+                  </Table.Th>
+                  <Table.Th w={56}></Table.Th>
                   <Table.Th>Name</Table.Th>
                   <Table.Th>Kind</Table.Th>
-                  <Table.Th>Items</Table.Th>
-                  <Table.Th>Zone</Table.Th>
-                  <Table.Th>Open</Table.Th>
+                  <Table.Th>Size</Table.Th>
+                  <Table.Th>Created</Table.Th>
+                  <Table.Th>Updated</Table.Th>
+                  <Table.Th w={64}></Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
                 {listingError ? (
                   <Table.Tr>
-                    <Table.Td colSpan={5}>
+                    <Table.Td colSpan={8}>
                       <Alert
                         color="red"
                         variant="light"
@@ -281,65 +310,73 @@ export function ExplorerPage() {
                 {children.map((child) => (
                   <Table.Tr
                     key={child.path}
-                    className="explorer-clickable-row"
-                    onClick={() =>
-                      child.kind === 'collection'
-                        ? openCollection(child.path)
-                        : navigate(
-                            `/app/explorer/details?irods_path=${encodeURIComponent(child.path)}`,
-                          )
-                    }
+                    className={`explorer-clickable-row${
+                      selectedChildren.includes(child.path) ? ' explorer-row-selected' : ''
+                    }`}
+                    onClick={() => void openPath(child.path)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        void openPath(child.path)
+                      }
+                    }}
+                    tabIndex={0}
                   >
                     <Table.Td>
-                      <Group gap="sm" wrap="nowrap">
-                        <ThemeIcon
-                          size="md"
-                          variant="light"
-                          color={child.kind === 'collection' ? 'blue' : 'teal'}
-                        >
-                          {child.kind === 'collection' ? (
-                            <IconFolder size={14} />
-                          ) : (
-                            <IconFile size={14} />
-                          )}
-                        </ThemeIcon>
-                        <div>
-                          <Text fw={600}>
-                            {child.path_segments.at(-1)?.display_name ?? displayName(child.path)}
-                          </Text>
-                          <Text size="xs" c="dimmed">
-                            {child.path}
-                          </Text>
-                        </div>
-                      </Group>
+                      <Checkbox
+                        aria-label={`Select ${displayName(child.path)}`}
+                        checked={selectedChildren.includes(child.path)}
+                        onChange={() => toggleChildSelection(child.path)}
+                        onClick={(event) => event.stopPropagation()}
+                      />
                     </Table.Td>
-                    <Table.Td>{child.kind}</Table.Td>
-                    <Table.Td>{child.kind === 'collection' ? (child.childCount ?? '—') : '—'}</Table.Td>
-                    <Table.Td>{child.zone}</Table.Td>
                     <Table.Td>
-                      <Button
-                        size="xs"
-                        variant="subtle"
+                      <ThemeIcon
+                        size="md"
+                        variant="light"
+                        color={child.kind === 'collection' ? 'blue' : 'teal'}
+                      >
+                        {child.kind === 'collection' ? (
+                          <IconFolder size={14} />
+                        ) : (
+                          <IconFile size={14} />
+                        )}
+                      </ThemeIcon>
+                    </Table.Td>
+                    <Table.Td>
+                      <Anchor
+                        fw={600}
+                        underline="never"
                         onClick={(event) => {
                           event.stopPropagation()
-                          if (child.kind === 'collection') {
-                            openCollection(child.path)
-                            return
-                          }
-
-                          navigate(
-                            `/app/explorer/details?irods_path=${encodeURIComponent(child.path)}`,
-                          )
+                          void openPath(child.path)
                         }}
                       >
-                        {child.kind === 'collection' ? 'Open folder' : 'Open details'}
-                      </Button>
+                        {child.path_segments.at(-1)?.display_name ?? displayName(child.path)}
+                      </Anchor>
+                    </Table.Td>
+                    <Table.Td>{child.kind === 'data_object' ? 'file' : 'folder'}</Table.Td>
+                    <Table.Td>{child.kind === 'data_object' ? (child.display_size ?? '—') : '—'}</Table.Td>
+                    <Table.Td>{formatDateTime(child.created_at)}</Table.Td>
+                    <Table.Td>{formatDateTime(child.updated_at)}</Table.Td>
+                    <Table.Td>
+                      <ActionIcon
+                        variant="subtle"
+                        color="gray"
+                        aria-label={`Open details for ${displayName(child.path)}`}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          openDetails(child.path)
+                        }}
+                      >
+                        <IconDots size={16} />
+                      </ActionIcon>
                     </Table.Td>
                   </Table.Tr>
                 ))}
                 {!children.length && !childrenQuery.isLoading && !listingError ? (
                   <Table.Tr>
-                    <Table.Td colSpan={5}>
+                    <Table.Td colSpan={8}>
                       <Text size="sm" c="dimmed">
                         Empty collection.
                       </Text>
@@ -348,7 +385,7 @@ export function ExplorerPage() {
                 ) : null}
                 {childrenQuery.isLoading ? (
                   <Table.Tr>
-                    <Table.Td colSpan={5}>
+                    <Table.Td colSpan={8}>
                       <Text size="sm" c="dimmed">
                         Loading collection contents...
                       </Text>

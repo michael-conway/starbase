@@ -22,6 +22,9 @@ export interface PathEntry {
   path: string
   kind: 'data_object' | 'collection'
   zone: string
+  display_size?: string
+  created_at?: string
+  updated_at?: string
   parent?: ParentLink
   path_segments: PathSegmentLink[]
   hasChildren?: boolean
