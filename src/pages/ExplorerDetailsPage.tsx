@@ -19,7 +19,9 @@ import {
   ThemeIcon,
   Title,
 } from '@mantine/core'
+import { notifications } from '@mantine/notifications'
 import { useQuery } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import {
   IconAlertCircle,
   IconArrowLeft,
@@ -29,10 +31,11 @@ import {
   IconDownload,
   IconFile,
   IconFolder,
+  IconFingerprint,
   IconUpload,
 } from '@tabler/icons-react'
 import { displayName, formatBytes, formatDateTime } from '../features/explorer'
-import { downloadPathUrl, getPath, getPathAVUs } from '../lib/irods-rest'
+import { computePathChecksum, downloadPathUrl, getPath, getPathAVUs } from '../lib/irods-rest'
 import { useSession } from '../providers/session'
 
 function avuRows(
@@ -75,6 +78,20 @@ function avuRows(
   ))
 }
 
+function checksumValueOnly(checksum?: { checksum?: string; type?: string }) {
+  const raw = checksum?.checksum?.trim()
+  if (!raw) {
+    return 'N/A'
+  }
+
+  const [prefix, remainder] = raw.split(':', 2)
+  if (remainder && checksum?.type && prefix.toLowerCase() === checksum.type.toLowerCase()) {
+    return remainder
+  }
+
+  return remainder ?? raw
+}
+
 export function ExplorerDetailsPage() {
   const { connection } = useSession()
   const navigate = useNavigate()
@@ -90,6 +107,24 @@ export function ExplorerDetailsPage() {
     queryKey: ['path-avus', irodsPath, connection],
     queryFn: () => getPathAVUs(irodsPath, connection.auth, connection.baseUrl),
     enabled: Boolean(irodsPath),
+  })
+  const checksumMutation = useMutation({
+    mutationFn: () => computePathChecksum(irodsPath, connection.auth, connection.baseUrl),
+    onSuccess: async (payload) => {
+      notifications.show({
+        title: 'Checksum updated',
+        message: payload.checksum ?? 'Checksum computed',
+        color: 'teal',
+      })
+      await detailsQuery.refetch()
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'Checksum failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
   })
 
   const breadcrumbs = useMemo(() => detailsQuery.data?.path_segments ?? [], [detailsQuery.data])
@@ -243,9 +278,14 @@ export function ExplorerDetailsPage() {
                     />
                     {detailsQuery.data.kind === 'data_object' ? (
                       <SummaryStat
-                        label="Checksum"
-                        value={detailsQuery.data.checksum ?? 'N/A'}
-                        code
+                        label="MIME type"
+                        value={detailsQuery.data.mime_type ?? 'N/A'}
+                      />
+                    ) : null}
+                    {detailsQuery.data.kind === 'data_object' ? (
+                      <SummaryStat
+                        label="Checksum type"
+                        value={detailsQuery.data.checksum?.type ?? 'N/A'}
                       />
                     ) : (
                       <SummaryStat
@@ -301,9 +341,28 @@ export function ExplorerDetailsPage() {
                           {detailsQuery.data.kind === 'data_object' ? (
                             <>
                               <InfoRow
-                                label="Checksum"
-                                value={detailsQuery.data.checksum ?? 'N/A'}
+                                label="MIME type"
+                                value={detailsQuery.data.mime_type ?? 'N/A'}
+                              />
+                              <InfoRow
+                                label="Checksum type"
+                                value={detailsQuery.data.checksum?.type ?? 'N/A'}
+                              />
+                              <InfoRow
+                                label="Checksum value"
+                                value={checksumValueOnly(detailsQuery.data.checksum)}
                                 code
+                                action={
+                                  <Button
+                                    size="xs"
+                                    variant="light"
+                                    leftSection={<IconFingerprint size={14} />}
+                                    loading={checksumMutation.isPending}
+                                    onClick={() => checksumMutation.mutate()}
+                                  >
+                                    Compute
+                                  </Button>
+                                }
                               />
                               <InfoRow
                                 label="Primary resource"

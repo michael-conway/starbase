@@ -22,6 +22,7 @@ export interface PathEntry {
   path: string
   kind: 'data_object' | 'collection'
   zone: string
+  mime_type?: string
   display_size?: string
   created_at?: string
   updated_at?: string
@@ -29,7 +30,7 @@ export interface PathEntry {
   path_segments: PathSegmentLink[]
   hasChildren?: boolean
   childCount?: number
-  checksum?: string
+  checksum?: PathChecksum
   size?: number
   resource?: string
   replicas?: PathReplica[]
@@ -71,6 +72,18 @@ export interface PathAVUResponse {
   irods_path: string
   path_segments: PathSegmentLink[]
   avus: AVUEntry[]
+}
+
+export interface PathChecksumResponse {
+  irods_path: string
+  path_segments: PathSegmentLink[]
+  checksum?: string
+  type?: string
+}
+
+export interface PathChecksum {
+  checksum?: string
+  type?: string
 }
 
 export interface ApiErrorPayload {
@@ -138,9 +151,11 @@ async function request<T>(
   options?: {
     auth?: RequestAuth
     baseUrl?: string
+    method?: string
   },
 ): Promise<T> {
   const response = await fetch(buildUrl(path, options?.baseUrl), {
+    method: options?.method,
     headers: buildHeaders(options?.auth),
   })
 
@@ -206,6 +221,14 @@ export function getPathAVUs(irodsPath: string, auth: RequestAuth, baseUrl?: stri
   return request<PathAVUResponse>(`/api/v1/path/avu${withPath(irodsPath)}`, {
     auth,
     baseUrl,
+  })
+}
+
+export function computePathChecksum(irodsPath: string, auth: RequestAuth, baseUrl?: string) {
+  return request<PathChecksumResponse>(`/api/v1/path/checksum${withPath(irodsPath)}`, {
+    auth,
+    baseUrl,
+    method: 'POST',
   })
 }
 
