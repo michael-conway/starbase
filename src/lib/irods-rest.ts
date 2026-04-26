@@ -32,13 +32,45 @@ export interface PathEntry {
   checksum?: string
   size?: number
   resource?: string
+  replicas?: PathReplica[]
   metadata?: Record<string, string>
+}
+
+export interface PathReplica {
+  number: number
+  owner?: string
+  resource_name?: string
+  resource_hierarchy?: string
+  size?: number
+  display_size?: string
+  updated_at?: string
+  status?: string
+  status_symbol?: string
+  status_description?: string
+  checksum?: string
+  data_type?: string
+  physical_path?: string
 }
 
 export interface PathChildrenResponse {
   irods_path: string
   path_segments: PathSegmentLink[]
   children: PathEntry[]
+}
+
+export interface AVUEntry {
+  id: string
+  attrib: string
+  value: string
+  unit?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface PathAVUResponse {
+  irods_path: string
+  path_segments: PathSegmentLink[]
+  avus: AVUEntry[]
 }
 
 export interface ApiErrorPayload {
@@ -131,16 +163,29 @@ async function request<T>(
   return (await response.json()) as T
 }
 
-function withPath(path: string) {
-  return `?irods_path=${encodeURIComponent(path)}`
+function withPath(path: string, options?: { verbose?: number }) {
+  const params = new URLSearchParams({
+    irods_path: path,
+  })
+
+  if (options?.verbose !== undefined) {
+    params.set('verbose', `${options.verbose}`)
+  }
+
+  return `?${params.toString()}`
 }
 
 export function getHealth(baseUrl?: string) {
   return request<HealthResponse>('/healthz', { baseUrl })
 }
 
-export function getPath(irodsPath: string, auth: RequestAuth, baseUrl?: string) {
-  return request<PathEntry>(`/api/v1/path${withPath(irodsPath)}`, {
+export function getPath(
+  irodsPath: string,
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: { verbose?: number },
+) {
+  return request<PathEntry>(`/api/v1/path${withPath(irodsPath, options)}`, {
     auth,
     baseUrl,
   })
@@ -152,6 +197,13 @@ export function getPathChildren(
   baseUrl?: string,
 ) {
   return request<PathChildrenResponse>(`/api/v1/path/children${withPath(irodsPath)}`, {
+    auth,
+    baseUrl,
+  })
+}
+
+export function getPathAVUs(irodsPath: string, auth: RequestAuth, baseUrl?: string) {
+  return request<PathAVUResponse>(`/api/v1/path/avu${withPath(irodsPath)}`, {
     auth,
     baseUrl,
   })
