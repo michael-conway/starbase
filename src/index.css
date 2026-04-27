@@ -107,13 +107,12 @@ body {
   background: rgba(15, 118, 110, 0.05);
 }
 
-.details-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.8fr);
-  gap: 16px;
+.details-header-main {
+  flex: 1;
+  min-width: 0;
 }
 
-.details-header-main {
+.details-header-copy {
   flex: 1;
   min-width: 0;
 }
@@ -143,10 +142,6 @@ body {
 @media (max-width: 1100px) {
   .explorer-layout {
     grid-template-columns: 220px minmax(0, 1fr);
-  }
-
-  .details-layout {
-    grid-template-columns: 1fr;
   }
 
   .details-header-summary {
