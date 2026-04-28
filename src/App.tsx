@@ -1,27 +1,69 @@
 import { useState } from 'react'
-import { Link, NavLink, Outlet } from 'react-router-dom'
+import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
+  ActionIcon,
   AppShell,
   Badge,
   Burger,
   Button,
   Container,
-  Divider,
   Group,
+  Menu,
   Stack,
   Text,
   Title,
 } from '@mantine/core'
 import { useQuery } from '@tanstack/react-query'
 import {
-  IconBinoculars,
+  IconLogout,
+  IconUserCircle,
 } from '@tabler/icons-react'
 import { primarySections } from './app-sections'
+import { defaultPath } from './features/explorer'
 import { getHealth } from './lib/irods-rest'
 import { useSession } from './providers/session'
 
+function userFromOIDCToken(token: string) {
+  const payload = token.split('.')[1]
+  if (!payload) {
+    return ''
+  }
+
+  try {
+    const normalizedPayload = payload.replace(/-/g, '+').replace(/_/g, '/')
+    const paddedPayload = normalizedPayload.padEnd(
+      normalizedPayload.length + ((4 - (normalizedPayload.length % 4)) % 4),
+      '=',
+    )
+    const decoded = JSON.parse(window.atob(paddedPayload)) as {
+      preferred_username?: string
+      irods_user_name?: string
+      email?: string
+      sub?: string
+    }
+
+    return (
+      decoded.irods_user_name?.trim() ||
+      decoded.preferred_username?.trim() ||
+      decoded.email?.trim() ||
+      decoded.sub?.trim() ||
+      ''
+    )
+  } catch {
+    return ''
+  }
+}
+
+function zoneFromSearch(search: string) {
+  const params = new URLSearchParams(search)
+  const path = params.get('irods_path')?.trim() || defaultPath
+
+  return path.split('/').filter(Boolean).at(0) || 'tempZone'
+}
+
 function App() {
-  const { clearSession, connection } = useSession()
+  const { basicUsername, clearSession, connection, oidcToken } = useSession()
+  const location = useLocation()
   const [menuOpened, setMenuOpened] = useState(true)
   const healthQuery = useQuery({
     queryKey: ['health', connection.baseUrl],
@@ -29,6 +71,12 @@ function App() {
     retry: 1,
     staleTime: 30_000,
   })
+  const currentUser =
+    connection.auth.mode === 'basic'
+      ? basicUsername || 'Unknown user'
+      : userFromOIDCToken(oidcToken) || 'OIDC user'
+  const currentZone = zoneFromSearch(location.search)
+  const authModeLabel = connection.auth.mode === 'basic' ? 'Basic auth' : 'OIDC'
 
   return (
     <AppShell
@@ -55,15 +103,7 @@ function App() {
             </div>
 
             <Stack gap={6} align="flex-end">
-              <Group gap="sm">
-                <Button component={Link} to="/app/setup" variant="subtle">
-                  Setup
-                </Button>
-                <Button variant="default" onClick={clearSession}>
-                  Sign out
-                </Button>
-              </Group>
-              <Group gap="xs">
+              <Group gap="sm" align="center">
                 <Text size="sm" c="dimmed">
                   Status
                 </Text>
@@ -83,6 +123,50 @@ function App() {
                       ? 'offline'
                       : 'checking'}
                 </Badge>
+
+                <Menu position="bottom-end" width={240} shadow="md">
+                  <Menu.Target>
+                    <ActionIcon
+                      variant="default"
+                      size="lg"
+                      aria-label="Open user menu"
+                    >
+                      <IconUserCircle size={22} />
+                    </ActionIcon>
+                  </Menu.Target>
+
+                  <Menu.Dropdown>
+                    <Menu.Label>iRODS session</Menu.Label>
+                    <Stack gap={4} px="sm" py={6}>
+                      <Text size="xs" c="dimmed">
+                        Zone
+                      </Text>
+                      <Text size="sm" fw={600}>
+                        {currentZone}
+                      </Text>
+                      <Text size="xs" c="dimmed" mt={4}>
+                        User
+                      </Text>
+                      <Text size="sm" fw={600}>
+                        {currentUser}
+                      </Text>
+                      <Text size="xs" c="dimmed" mt={4}>
+                        Connection
+                      </Text>
+                      <Badge variant="light" color="blue" w="fit-content">
+                        {authModeLabel}
+                      </Badge>
+                    </Stack>
+                    <Menu.Divider />
+                    <Menu.Item
+                      color="red"
+                      leftSection={<IconLogout size={16} />}
+                      onClick={clearSession}
+                    >
+                      Sign out
+                    </Menu.Item>
+                  </Menu.Dropdown>
+                </Menu>
               </Group>
             </Stack>
           </Group>
@@ -115,29 +199,6 @@ function App() {
               </Button>
             ))}
           </Stack>
-
-          <Divider />
-
-          <Stack gap="xs">
-            <Text size="xs" tt="uppercase" fw={700} c="dimmed">
-              Connection
-            </Text>
-            <Badge variant="light" color="blue">
-              {connection.auth.mode === 'basic' ? 'Basic auth' : 'OIDC'}
-            </Badge>
-          </Stack>
-
-          <div style={{ flex: 1 }} />
-
-          <Button
-            component={Link}
-            to="/app/setup"
-            justify="flex-start"
-            variant="default"
-            leftSection={<IconBinoculars size={18} />}
-          >
-            Setup
-          </Button>
         </Stack>
       </AppShell.Navbar>
 

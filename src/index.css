@@ -112,6 +112,18 @@ body {
   min-width: 0;
 }
 
+.details-header-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 240px;
+  gap: 16px;
+  align-items: start;
+}
+
+.details-header-card,
+.details-actions-card {
+  min-width: 0;
+}
+
 .details-header-copy {
   flex: 1;
   min-width: 0;
@@ -144,6 +156,10 @@ body {
     grid-template-columns: 220px minmax(0, 1fr);
   }
 
+  .details-header-layout {
+    grid-template-columns: minmax(0, 1fr) 220px;
+  }
+
   .details-header-summary {
     grid-template-columns: 1fr;
   }
@@ -163,5 +179,9 @@ body {
     min-width: 0;
     width: 100%;
     flex-direction: column;
+  }
+
+  .details-header-layout {
+    grid-template-columns: 1fr;
   }
 }

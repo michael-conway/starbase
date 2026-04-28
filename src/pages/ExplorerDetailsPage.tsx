@@ -406,122 +406,128 @@ export function ExplorerDetailsPage() {
 
           {detailsQuery.data ? (
             <Stack gap="md">
-              <Paper withBorder radius="lg" p="lg">
-                <Stack gap="md">
-                  <Group justify="space-between" align="flex-start">
-                    <Group gap="sm" align="flex-start" className="details-header-main">
-                      <ThemeIcon
-                        variant="light"
-                        color={detailsQuery.data.kind === 'collection' ? 'blue' : 'teal'}
-                        size="xl"
-                      >
-                        {detailsQuery.data.kind === 'collection' ? (
-                          <IconFolder size={20} />
-                        ) : (
-                          <IconFile size={20} />
-                        )}
-                      </ThemeIcon>
-                      <Group justify="space-between" align="flex-start" className="details-header-copy">
-                        <div>
-                          <Title order={3}>{displayName(detailsQuery.data.path)}</Title>
-                          <Text c="dimmed">
-                            {detailsQuery.data.parent?.irods_path ?? 'Path root'}
-                          </Text>
-                        </div>
+              <div className="details-header-layout">
+                <Paper withBorder radius="lg" p="lg" className="details-header-card">
+                  <Stack gap="md">
+                    <Group justify="space-between" align="flex-start">
+                      <Group gap="sm" align="flex-start" className="details-header-main">
+                        <ThemeIcon
+                          variant="light"
+                          color={detailsQuery.data.kind === 'collection' ? 'blue' : 'teal'}
+                          size="xl"
+                        >
+                          {detailsQuery.data.kind === 'collection' ? (
+                            <IconFolder size={20} />
+                          ) : (
+                            <IconFile size={20} />
+                          )}
+                        </ThemeIcon>
+                        <Group
+                          justify="space-between"
+                          align="flex-start"
+                          className="details-header-copy"
+                        >
+                          <div>
+                            <Title order={3}>{displayName(detailsQuery.data.path)}</Title>
+                            <Text c="dimmed">
+                              {detailsQuery.data.parent?.irods_path ?? 'Path root'}
+                            </Text>
+                          </div>
 
-                        <Group gap="xs">
-                          <Badge variant="light" color="blue">
-                            {detailsQuery.data.kind}
-                          </Badge>
-                          <Badge variant="dot" color="gray">
-                            {detailsQuery.data.zone}
-                          </Badge>
+                          <Group gap="xs">
+                            <Badge variant="light" color="blue">
+                              {detailsQuery.data.kind}
+                            </Badge>
+                            <Badge variant="dot" color="gray">
+                              {detailsQuery.data.zone}
+                            </Badge>
+                          </Group>
                         </Group>
                       </Group>
                     </Group>
-                  </Group>
 
-                  <div className="details-header-summary">
-                    <SummaryStat
-                      label="Path"
-                      value={detailsQuery.data.path}
-                      code
-                      action={
-                        <ActionIcon
-                          variant="subtle"
-                          color="gray"
-                          aria-label="Copy path"
-                          onClick={() => void copyText(detailsQuery.data.path)}
-                        >
-                          <IconCopy size={16} />
-                        </ActionIcon>
-                      }
-                    />
-                    <SummaryStat
-                      label="Size"
-                      value={detailsQuery.data.display_size ?? formatBytes(detailsQuery.data.size)}
-                    />
-                    <SummaryStat
-                      label="Updated"
-                      value={formatDateTime(detailsQuery.data.updated_at)}
-                    />
-                    <SummaryStat
-                      label="Resource"
-                      value={detailsQuery.data.resource ?? 'N/A'}
-                    />
-                    {detailsQuery.data.kind === 'data_object' ? (
+                    <div className="details-header-summary">
                       <SummaryStat
-                        label="MIME type"
-                        value={detailsQuery.data.mime_type ?? 'N/A'}
-                      />
-                    ) : null}
-                    {detailsQuery.data.kind === 'data_object' ? null : (
-                      <SummaryStat
-                        label="Children"
-                        value={
-                          detailsQuery.data.childCount === undefined
-                            ? 'N/A'
-                            : `${detailsQuery.data.childCount}`
+                        label="Path"
+                        value={detailsQuery.data.path}
+                        code
+                        action={
+                          <ActionIcon
+                            variant="subtle"
+                            color="gray"
+                            aria-label="Copy path"
+                            onClick={() => void copyText(detailsQuery.data.path)}
+                          >
+                            <IconCopy size={16} />
+                          </ActionIcon>
                         }
                       />
-                    )}
-                  </div>
+                      <SummaryStat
+                        label="Size"
+                        value={detailsQuery.data.display_size ?? formatBytes(detailsQuery.data.size)}
+                      />
+                      <SummaryStat
+                        label="Updated"
+                        value={formatDateTime(detailsQuery.data.updated_at)}
+                      />
+                      <SummaryStat
+                        label="Resource"
+                        value={detailsQuery.data.resource ?? 'N/A'}
+                      />
+                      {detailsQuery.data.kind === 'data_object' ? (
+                        <SummaryStat
+                          label="MIME type"
+                          value={detailsQuery.data.mime_type ?? 'N/A'}
+                        />
+                      ) : null}
+                      {detailsQuery.data.kind === 'data_object' ? null : (
+                        <SummaryStat
+                          label="Children"
+                          value={
+                            detailsQuery.data.childCount === undefined
+                              ? 'N/A'
+                              : `${detailsQuery.data.childCount}`
+                          }
+                        />
+                      )}
+                    </div>
+                  </Stack>
+                </Paper>
 
-                  <Card shadow="sm" radius="xl" padding="lg">
-                    <Stack gap="sm">
-                      <Title order={4}>Actions</Title>
-                      <DetailsDownloadButton path={detailsQuery.data.path} />
-                      <Button variant="default" leftSection={<IconUpload size={14} />}>
-                        Replace object
+                <Card shadow="sm" radius="xl" padding="lg" className="details-actions-card">
+                  <Stack gap="sm">
+                    <Title order={4}>Actions</Title>
+                    <DetailsDownloadButton path={detailsQuery.data.path} />
+                    <Button variant="default" leftSection={<IconUpload size={14} />}>
+                      Replace object
+                    </Button>
+                    {detailsQuery.data.kind === 'collection' ? (
+                      <Button
+                        variant="light"
+                        onClick={() =>
+                          navigate(
+                            `/app/explorer?irods_path=${encodeURIComponent(detailsQuery.data.path)}`,
+                          )
+                        }
+                      >
+                        Open collection
                       </Button>
-                      {detailsQuery.data.kind === 'collection' ? (
-                        <Button
-                          variant="light"
-                          onClick={() =>
-                            navigate(
-                              `/app/explorer?irods_path=${encodeURIComponent(detailsQuery.data.path)}`,
-                            )
-                          }
-                        >
-                          Open collection
-                        </Button>
-                      ) : null}
-                      {detailsQuery.data.parent ? (
-                        <Button
-                          variant="light"
-                          onClick={() =>
-                            navigate(
-                              `/app/explorer?irods_path=${encodeURIComponent(detailsQuery.data.parent!.irods_path)}`,
-                            )
-                          }
-                        >
-                          Open parent collection
-                        </Button>
-                      ) : null}
-                    </Stack>
-                  </Card>
-                </Stack>
-              </Paper>
+                    ) : null}
+                    {detailsQuery.data.parent ? (
+                      <Button
+                        variant="light"
+                        onClick={() =>
+                          navigate(
+                            `/app/explorer?irods_path=${encodeURIComponent(detailsQuery.data.parent!.irods_path)}`,
+                          )
+                        }
+                      >
+                        Open parent collection
+                      </Button>
+                    ) : null}
+                  </Stack>
+                </Card>
+              </div>
 
               <Card shadow="sm" radius="xl" padding="lg">
                 <Tabs defaultValue="overview" keepMounted={false}>
