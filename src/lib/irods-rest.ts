@@ -41,6 +41,8 @@ export interface PathEntry {
     avus?: ActionLink
     create_avu?: ActionLink
     create_ticket?: ActionLink
+    create_child_collection?: ActionLink
+    create_child_data_object?: ActionLink
   }
   path_segments: PathSegmentLink[]
   hasChildren?: boolean
@@ -316,6 +318,80 @@ export function getPathChildren(
   return request<PathChildrenResponse>(`/api/v1/path/children${withPath(irodsPath)}`, {
     auth,
     baseUrl,
+  })
+}
+
+export function createPathChild(
+  parentPath: string,
+  payload: {
+    child_name: string
+    kind: 'collection' | 'data_object'
+    mkdirs?: boolean
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  return request<PathEntry>(`/api/v1/path/children${withPath(parentPath)}`, {
+    auth,
+    baseUrl,
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function deletePath(
+  irodsPath: string,
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: { force?: boolean },
+) {
+  const params = new URLSearchParams({
+    irods_path: irodsPath,
+  })
+
+  if (options?.force) {
+    params.set('force', 'true')
+  }
+
+  const response = await fetch(buildUrl(`/api/v1/path?${params.toString()}`, baseUrl), {
+    method: 'DELETE',
+    headers: buildHeaders(auth),
+  })
+
+  if (!response.ok) {
+    let payload: ApiErrorPayload | null = null
+
+    try {
+      payload = (await response.json()) as ApiErrorPayload
+    } catch {
+      // Fall back to the HTTP status when the response body is not JSON.
+    }
+
+    throw new ApiError(
+      response.status,
+      payload?.message ?? `Request failed with status ${response.status}`,
+      payload?.code,
+    )
+  }
+}
+
+export function renamePath(
+  irodsPath: string,
+  payload: { new_name: string },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  return request<PathEntry>(`/api/v1/path/actions/move${withPath(irodsPath)}`, {
+    auth,
+    baseUrl,
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
   })
 }
 

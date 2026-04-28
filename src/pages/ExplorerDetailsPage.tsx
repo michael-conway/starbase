@@ -11,8 +11,10 @@ import {
   Divider,
   Group,
   Loader,
+  Modal,
   Paper,
   Stack,
+  Switch,
   Table,
   Tabs,
   Text,
@@ -26,36 +28,52 @@ import { useMutation } from '@tanstack/react-query'
 import {
   IconAlertCircle,
   IconArrowLeft,
-  IconPlus,
   IconBinaryTree2,
   IconCopy,
   IconDatabase,
   IconDownload,
+  IconEdit,
   IconFile,
   IconFolder,
   IconFingerprint,
   IconKey,
+  IconPlus,
   IconTrash,
   IconUpload,
 } from '@tabler/icons-react'
 import { displayName, formatBytes, formatDateTime } from '../features/explorer'
 import {
   addAVU,
+  actionLinkUrl,
+  ApiError,
   computePathChecksum,
   createPathTicket,
   deleteAVU,
+  deletePath,
   deleteTicket,
   downloadPath,
-  actionLinkUrl,
   getPath,
   getPathAVUs,
   getTickets,
+  renamePath,
   type ActionLink,
   type PathEntry,
   type TicketEntry,
   updateTicket,
 } from '../lib/irods-rest'
 import { useSession } from '../providers/session'
+
+interface DeleteDialogState {
+  path: string
+  label: string
+  kind: PathEntry['kind']
+}
+
+interface RenameDialogState {
+  path: string
+  label: string
+  kind: PathEntry['kind']
+}
 
 function avuCreateAction(entry?: Pick<PathEntry, 'links'>): ActionLink | undefined {
   const action = entry?.links?.create_avu ?? entry?.links?.avus
@@ -203,6 +221,10 @@ export function ExplorerDetailsPage() {
     maximumUses: '',
     lifetimeMinutes: '',
   })
+  const [deleteDialog, setDeleteDialog] = useState<DeleteDialogState | null>(null)
+  const [deleteForce, setDeleteForce] = useState(false)
+  const [renameDialog, setRenameDialog] = useState<RenameDialogState | null>(null)
+  const [renameName, setRenameName] = useState('')
 
   const detailsQuery = useQuery({
     queryKey: ['path-detail', irodsPath, connection],
@@ -375,6 +397,94 @@ export function ExplorerDetailsPage() {
       }
     },
   })
+  const deletePathMutation = useMutation({
+    mutationFn: async () => {
+      if (!deleteDialog) {
+        throw new ApiError(400, 'No delete target was selected.')
+      }
+
+      await deletePath(deleteDialog.path, connection.auth, connection.baseUrl, {
+        force: deleteForce,
+      })
+
+      return deleteDialog
+    },
+    onSuccess: (deleted) => {
+      notifications.show({
+        title: deleted.kind === 'collection' ? 'Folder deleted' : 'File deleted',
+        message: deleted.path,
+        color: 'teal',
+      })
+      setDeleteDialog(null)
+      setDeleteForce(false)
+
+      if (detailsQuery.data?.parent?.irods_path) {
+        navigate(
+          `/app/explorer?irods_path=${encodeURIComponent(detailsQuery.data.parent.irods_path)}`,
+        )
+        return
+      }
+
+      navigate('/app/explorer')
+    },
+    onError: (error: Error) => {
+      if (error instanceof ApiError && error.status === 409) {
+        setDeleteForce(true)
+        notifications.show({
+          title: 'Folder is not empty',
+          message: 'Enable force delete to remove this collection recursively.',
+          color: 'yellow',
+        })
+        return
+      }
+
+      notifications.show({
+        title: 'Delete failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+  const renamePathMutation = useMutation({
+    mutationFn: async () => {
+      if (!renameDialog) {
+        throw new ApiError(400, 'No rename target was selected.')
+      }
+
+      const newName = renameName.trim()
+      if (!newName) {
+        throw new ApiError(400, 'Enter a new name.')
+      }
+
+      return renamePath(
+        renameDialog.path,
+        {
+          new_name: newName,
+        },
+        connection.auth,
+        connection.baseUrl,
+      )
+    },
+    onSuccess: (renamed) => {
+      notifications.show({
+        title: renamed.kind === 'collection' ? 'Folder renamed' : 'File renamed',
+        message: renamed.path,
+        color: 'teal',
+      })
+      setRenameDialog(null)
+      setRenameName('')
+      navigate(`/app/explorer/details?irods_path=${encodeURIComponent(renamed.path)}`, {
+        replace: true,
+      })
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'Rename failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
 
   const breadcrumbs = useMemo(() => detailsQuery.data?.path_segments ?? [], [detailsQuery.data])
   const ticketsForPath = useMemo(
@@ -384,6 +494,8 @@ export function ExplorerDetailsPage() {
       ),
     [ticketsQuery.data, irodsPath],
   )
+  const isCollection = detailsQuery.data?.kind === 'collection'
+  const isDataObject = detailsQuery.data?.kind === 'data_object'
   const backPath = useMemo(() => {
     if (!detailsQuery.data) {
       return ''
@@ -393,6 +505,10 @@ export function ExplorerDetailsPage() {
       ? detailsQuery.data.path
       : (detailsQuery.data.parent?.irods_path ?? '')
   }, [detailsQuery.data])
+  const deleteReturnPath = useMemo(
+    () => detailsQuery.data?.parent?.irods_path ?? '',
+    [detailsQuery.data],
+  )
 
   const copyText = async (value: string, label: string) => {
     try {
@@ -593,6 +709,37 @@ export function ExplorerDetailsPage() {
     })
   }
 
+  const beginPathDelete = () => {
+    if (!detailsQuery.data) {
+      return
+    }
+
+    const requiresForce =
+      detailsQuery.data.kind === 'collection' &&
+      Boolean(detailsQuery.data.hasChildren || (detailsQuery.data.childCount ?? 0) > 0)
+
+    setDeleteDialog({
+      path: detailsQuery.data.path,
+      label: displayName(detailsQuery.data.path),
+      kind: detailsQuery.data.kind,
+    })
+    setDeleteForce(requiresForce)
+  }
+
+  const beginPathRename = () => {
+    if (!detailsQuery.data) {
+      return
+    }
+
+    const label = displayName(detailsQuery.data.path)
+    setRenameDialog({
+      path: detailsQuery.data.path,
+      label,
+      kind: detailsQuery.data.kind,
+    })
+    setRenameName(label)
+  }
+
   if (!irodsPath) {
     return (
       <Alert variant="light" color="red" title="Missing path">
@@ -603,6 +750,104 @@ export function ExplorerDetailsPage() {
 
   return (
     <Stack gap="lg">
+      <Modal
+        opened={renameDialog !== null}
+        onClose={() => {
+          if (!renamePathMutation.isPending) {
+            setRenameDialog(null)
+            setRenameName('')
+          }
+        }}
+        title={renameDialog?.kind === 'collection' ? 'Rename folder' : 'Rename file'}
+        centered
+      >
+        <Stack gap="md">
+          <TextInput
+            label="New name"
+            value={renameName}
+            onChange={(event) => setRenameName(event.currentTarget.value)}
+            autoFocus
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                renamePathMutation.mutate()
+              }
+            }}
+          />
+
+          <Group justify="flex-end">
+            <Button
+              variant="default"
+              onClick={() => {
+                setRenameDialog(null)
+                setRenameName('')
+              }}
+              disabled={renamePathMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => renamePathMutation.mutate()}
+              loading={renamePathMutation.isPending}
+            >
+              Rename
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={deleteDialog !== null}
+        onClose={() => {
+          if (!deletePathMutation.isPending) {
+            setDeleteDialog(null)
+            setDeleteForce(false)
+          }
+        }}
+        title={deleteDialog?.kind === 'collection' ? 'Delete folder' : 'Delete file'}
+        centered
+      >
+        <Stack gap="md">
+          <Text>
+            Delete <strong>{deleteDialog?.label}</strong>?
+          </Text>
+
+          {deleteDialog?.kind === 'collection' ? (
+            <>
+              <Text size="sm" c="dimmed">
+                Non-empty collections require force delete, which removes the folder
+                recursively.
+              </Text>
+              <Switch
+                label="Force recursive delete"
+                checked={deleteForce}
+                onChange={(event) => setDeleteForce(event.currentTarget.checked)}
+              />
+            </>
+          ) : null}
+
+          <Group justify="flex-end">
+            <Button
+              variant="default"
+              onClick={() => {
+                setDeleteDialog(null)
+                setDeleteForce(false)
+              }}
+              disabled={deletePathMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              color="red"
+              onClick={() => deletePathMutation.mutate()}
+              loading={deletePathMutation.isPending}
+            >
+              Delete
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
       <Card shadow="sm" radius="xl" padding="lg">
         <Stack gap="md">
           <Group justify="space-between" align="center">
@@ -753,11 +998,30 @@ export function ExplorerDetailsPage() {
                 <Card shadow="sm" radius="xl" padding="lg" className="details-actions-card">
                   <Stack gap="sm">
                     <Title order={4}>Actions</Title>
-                    <DetailsDownloadButton path={detailsQuery.data.path} />
-                    <Button variant="default" leftSection={<IconUpload size={14} />}>
-                      Replace object
+                    {isDataObject ? (
+                      <DetailsDownloadButton path={detailsQuery.data.path} />
+                    ) : null}
+                    {isDataObject ? (
+                      <Button variant="default" leftSection={<IconUpload size={14} />}>
+                        Replace object
+                      </Button>
+                    ) : null}
+                    <Button
+                      variant="light"
+                      leftSection={<IconEdit size={14} />}
+                      onClick={beginPathRename}
+                    >
+                      Rename {detailsQuery.data.kind === 'collection' ? 'folder' : 'file'}
                     </Button>
-                    {detailsQuery.data.kind === 'collection' ? (
+                    <Button
+                      variant="light"
+                      color="red"
+                      leftSection={<IconTrash size={14} />}
+                      onClick={beginPathDelete}
+                    >
+                      Delete {detailsQuery.data.kind === 'collection' ? 'folder' : 'file'}
+                    </Button>
+                    {isCollection ? (
                       <Button
                         variant="light"
                         onClick={() =>
@@ -781,6 +1045,11 @@ export function ExplorerDetailsPage() {
                         Open parent collection
                       </Button>
                     ) : null}
+                    {!detailsQuery.data.parent && deleteReturnPath === '' ? (
+                      <Text size="sm" c="dimmed">
+                        Delete will return to the explorer root.
+                      </Text>
+                    ) : null}
                   </Stack>
                 </Card>
               </div>
@@ -789,11 +1058,9 @@ export function ExplorerDetailsPage() {
                 <Tabs defaultValue="overview" keepMounted={false}>
                   <Tabs.List grow>
                     <Tabs.Tab value="overview">Overview</Tabs.Tab>
-                    <Tabs.Tab value="storage">Storage</Tabs.Tab>
+                    {isDataObject ? <Tabs.Tab value="storage">Storage</Tabs.Tab> : null}
                     <Tabs.Tab value="avus">AVUs</Tabs.Tab>
-                    {detailsQuery.data.kind === 'data_object' ? (
-                      <Tabs.Tab value="tickets">Tickets</Tabs.Tab>
-                    ) : null}
+                    <Tabs.Tab value="tickets">Tickets</Tabs.Tab>
                   </Tabs.List>
 
                   <Tabs.Panel value="overview" pt="md">
@@ -824,7 +1091,7 @@ export function ExplorerDetailsPage() {
                           label="Updated"
                           value={formatDateTime(detailsQuery.data.updated_at)}
                         />
-                        {detailsQuery.data.kind === 'data_object' ? (
+                        {isDataObject ? (
                           <>
                             <InfoRow
                               label="MIME type"
@@ -869,8 +1136,8 @@ export function ExplorerDetailsPage() {
                     </Card>
                   </Tabs.Panel>
 
-                  <Tabs.Panel value="storage" pt="md">
-                    {detailsQuery.data.kind === 'data_object' ? (
+                  {isDataObject ? (
+                    <Tabs.Panel value="storage" pt="md">
                       <Card shadow="sm" radius="xl" padding="lg">
                         <Stack gap="sm">
                           <Group gap="xs">
@@ -970,14 +1237,8 @@ export function ExplorerDetailsPage() {
                           )}
                         </Stack>
                       </Card>
-                    ) : (
-                      <Card shadow="sm" radius="xl" padding="lg">
-                        <Text size="sm" c="dimmed">
-                          Storage detail will expand here for collections later.
-                        </Text>
-                      </Card>
-                    )}
-                  </Tabs.Panel>
+                    </Tabs.Panel>
+                  ) : null}
 
                   <Tabs.Panel value="avus" pt="md">
                     <Card shadow="sm" radius="xl" padding="lg">
@@ -1099,243 +1360,241 @@ export function ExplorerDetailsPage() {
                     </Card>
                   </Tabs.Panel>
 
-                  {detailsQuery.data.kind === 'data_object' ? (
-                    <Tabs.Panel value="tickets" pt="md">
-                      <Card shadow="sm" radius="xl" padding="lg">
-                        <Stack gap="sm">
-                          <Group gap="xs" justify="space-between">
-                            <Group gap="xs">
-                              <ThemeIcon variant="light" color="violet" size="md">
-                                <IconKey size={14} />
-                              </ThemeIcon>
-                              <Title order={4}>Tickets</Title>
-                            </Group>
-                            {ticketCreateAction(detailsQuery.data) ? (
-                              <Button
-                                size="xs"
-                                variant="light"
-                                leftSection={<IconPlus size={14} />}
-                                loading={createTicketMutation.isPending}
-                                onClick={beginTicketAdd}
-                                disabled={isAddingTicket}
-                              >
-                                Add ticket
-                              </Button>
-                            ) : null}
+                  <Tabs.Panel value="tickets" pt="md">
+                    <Card shadow="sm" radius="xl" padding="lg">
+                      <Stack gap="sm">
+                        <Group gap="xs" justify="space-between">
+                          <Group gap="xs">
+                            <ThemeIcon variant="light" color="violet" size="md">
+                              <IconKey size={14} />
+                            </ThemeIcon>
+                            <Title order={4}>Tickets</Title>
                           </Group>
-
-                          {ticketsQuery.isError ? (
-                            <Alert
-                              color="red"
+                          {ticketCreateAction(detailsQuery.data) ? (
+                            <Button
+                              size="xs"
                               variant="light"
-                              icon={<IconAlertCircle size={18} />}
-                              title="Unable to load tickets"
+                              leftSection={<IconPlus size={14} />}
+                              loading={createTicketMutation.isPending}
+                              onClick={beginTicketAdd}
+                              disabled={isAddingTicket}
                             >
-                              {ticketsQuery.error.message}
-                            </Alert>
-                          ) : (
-                            <Table highlightOnHover verticalSpacing="sm">
-                              <Table.Thead>
+                              Add ticket
+                            </Button>
+                          ) : null}
+                        </Group>
+
+                        {ticketsQuery.isError ? (
+                          <Alert
+                            color="red"
+                            variant="light"
+                            icon={<IconAlertCircle size={18} />}
+                            title="Unable to load tickets"
+                          >
+                            {ticketsQuery.error.message}
+                          </Alert>
+                        ) : (
+                          <Table highlightOnHover verticalSpacing="sm">
+                            <Table.Thead>
+                              <Table.Tr>
+                                <Table.Th>Name</Table.Th>
+                                <Table.Th>Bearer token</Table.Th>
+                                <Table.Th>Uses</Table.Th>
+                                <Table.Th>Expires</Table.Th>
+                                <Table.Th>Actions</Table.Th>
+                              </Table.Tr>
+                            </Table.Thead>
+                            <Table.Tbody>
+                              {ticketsQuery.isLoading ? (
                                 <Table.Tr>
-                                  <Table.Th>Name</Table.Th>
-                                  <Table.Th>Bearer token</Table.Th>
-                                  <Table.Th>Uses</Table.Th>
-                                  <Table.Th>Expires</Table.Th>
-                                  <Table.Th>Actions</Table.Th>
+                                  <Table.Td colSpan={5}>
+                                    <Text size="sm" c="dimmed">
+                                      Loading tickets...
+                                    </Text>
+                                  </Table.Td>
                                 </Table.Tr>
-                              </Table.Thead>
-                              <Table.Tbody>
-                                {ticketsQuery.isLoading ? (
-                                  <Table.Tr>
-                                    <Table.Td colSpan={5}>
-                                      <Text size="sm" c="dimmed">
-                                        Loading tickets...
-                                      </Text>
-                                    </Table.Td>
-                                  </Table.Tr>
-                                ) : isAddingTicket ? (
-                                  <Table.Tr className="explorer-row-selected">
+                              ) : isAddingTicket ? (
+                                <Table.Tr className="explorer-row-selected">
+                                  <Table.Td>
+                                    <Text size="sm" c="dimmed">
+                                      New ticket
+                                    </Text>
+                                  </Table.Td>
+                                  <Table.Td>
+                                    <Text size="sm" c="dimmed">
+                                      Generated by server
+                                    </Text>
+                                  </Table.Td>
+                                  <Table.Td>
+                                    <TextInput
+                                      placeholder="50"
+                                      value={ticketForm.maximumUses}
+                                      onChange={(event) =>
+                                        setTicketForm((current) => ({
+                                          ...current,
+                                          maximumUses: event.currentTarget.value,
+                                        }))
+                                      }
+                                    />
+                                  </Table.Td>
+                                  <Table.Td>
+                                    <TextInput
+                                      placeholder="720"
+                                      value={ticketForm.lifetimeMinutes}
+                                      onChange={(event) =>
+                                        setTicketForm((current) => ({
+                                          ...current,
+                                          lifetimeMinutes: event.currentTarget.value,
+                                        }))
+                                      }
+                                    />
+                                  </Table.Td>
+                                  <Table.Td>
+                                    <Group gap="xs" wrap="nowrap">
+                                      <Button
+                                        size="xs"
+                                        onClick={submitTicketAdd}
+                                        loading={createTicketMutation.isPending}
+                                      >
+                                        Create
+                                      </Button>
+                                      <Button size="xs" variant="default" onClick={cancelTicketAdd}>
+                                        Cancel
+                                      </Button>
+                                    </Group>
+                                  </Table.Td>
+                                </Table.Tr>
+                              ) : ticketsForPath.length === 0 ? (
+                                <Table.Tr>
+                                  <Table.Td colSpan={5}>
+                                    <Text size="sm" c="dimmed">
+                                      No tickets returned for this path.
+                                    </Text>
+                                  </Table.Td>
+                                </Table.Tr>
+                              ) : (
+                                ticketsForPath.map((ticket) => (
+                                  <Table.Tr key={ticket.name}>
                                     <Table.Td>
-                                      <Text size="sm" c="dimmed">
-                                        New ticket
-                                      </Text>
+                                      <Code>{ticket.name}</Code>
                                     </Table.Td>
                                     <Table.Td>
-                                      <Text size="sm" c="dimmed">
-                                        Generated by server
-                                      </Text>
+                                      <Group gap="xs" wrap="nowrap" align="flex-start">
+                                        <Text size="sm" className="details-code-cell">
+                                          {ticket.bearer_token ?? '—'}
+                                        </Text>
+                                        {ticket.bearer_token ? (
+                                          <ActionIcon
+                                            variant="subtle"
+                                            color="gray"
+                                            aria-label="Copy bearer token"
+                                            onClick={() => void copyText(ticket.bearer_token!, 'Bearer token')}
+                                          >
+                                            <IconCopy size={16} />
+                                          </ActionIcon>
+                                        ) : null}
+                                      </Group>
                                     </Table.Td>
                                     <Table.Td>
-                                      <TextInput
-                                        placeholder="50"
-                                        value={ticketForm.maximumUses}
-                                        onChange={(event) =>
-                                          setTicketForm((current) => ({
-                                            ...current,
-                                            maximumUses: event.currentTarget.value,
-                                          }))
-                                        }
-                                      />
+                                      {editingTicketName === ticket.name ? (
+                                        <TextInput
+                                          value={ticketEditForm.maximumUses}
+                                          onChange={(event) =>
+                                            setTicketEditForm((current) => ({
+                                              ...current,
+                                              maximumUses: event.currentTarget.value,
+                                            }))
+                                          }
+                                        />
+                                      ) : (
+                                        formatTicketLimit(ticket.uses_limit)
+                                      )}
                                     </Table.Td>
                                     <Table.Td>
-                                      <TextInput
-                                        placeholder="720"
-                                        value={ticketForm.lifetimeMinutes}
-                                        onChange={(event) =>
-                                          setTicketForm((current) => ({
-                                            ...current,
-                                            lifetimeMinutes: event.currentTarget.value,
-                                          }))
-                                        }
-                                      />
+                                      {editingTicketName === ticket.name ? (
+                                        <TextInput
+                                          value={ticketEditForm.lifetimeMinutes}
+                                          onChange={(event) =>
+                                            setTicketEditForm((current) => ({
+                                              ...current,
+                                              lifetimeMinutes: event.currentTarget.value,
+                                            }))
+                                          }
+                                        />
+                                      ) : (
+                                        formatDateTime(ticket.expiration_time)
+                                      )}
                                     </Table.Td>
                                     <Table.Td>
                                       <Group gap="xs" wrap="nowrap">
-                                        <Button
-                                          size="xs"
-                                          onClick={submitTicketAdd}
-                                          loading={createTicketMutation.isPending}
-                                        >
-                                          Create
-                                        </Button>
-                                        <Button size="xs" variant="default" onClick={cancelTicketAdd}>
-                                          Cancel
-                                        </Button>
-                                      </Group>
-                                    </Table.Td>
-                                  </Table.Tr>
-                                ) : ticketsForPath.length === 0 ? (
-                                  <Table.Tr>
-                                    <Table.Td colSpan={5}>
-                                      <Text size="sm" c="dimmed">
-                                        No tickets returned for this path.
-                                      </Text>
-                                    </Table.Td>
-                                  </Table.Tr>
-                                ) : (
-                                  ticketsForPath.map((ticket) => (
-                                    <Table.Tr key={ticket.name}>
-                                      <Table.Td>
-                                        <Code>{ticket.name}</Code>
-                                      </Table.Td>
-                                      <Table.Td>
-                                        <Group gap="xs" wrap="nowrap" align="flex-start">
-                                          <Text size="sm" className="details-code-cell">
-                                            {ticket.bearer_token ?? '—'}
-                                          </Text>
-                                          {ticket.bearer_token ? (
-                                            <ActionIcon
-                                              variant="subtle"
-                                              color="gray"
-                                              aria-label="Copy bearer token"
-                                              onClick={() => void copyText(ticket.bearer_token!, 'Bearer token')}
+                                        {editingTicketName === ticket.name ? (
+                                          <>
+                                            <Button
+                                              size="xs"
+                                              onClick={() => submitTicketEdit(ticket)}
+                                              loading={updateTicketMutation.isPending}
                                             >
-                                              <IconCopy size={16} />
-                                            </ActionIcon>
-                                          ) : null}
-                                        </Group>
-                                      </Table.Td>
-                                      <Table.Td>
-                                        {editingTicketName === ticket.name ? (
-                                          <TextInput
-                                            value={ticketEditForm.maximumUses}
-                                            onChange={(event) =>
-                                              setTicketEditForm((current) => ({
-                                                ...current,
-                                                maximumUses: event.currentTarget.value,
-                                              }))
-                                            }
-                                          />
+                                              Update
+                                            </Button>
+                                            <Button size="xs" variant="default" onClick={cancelTicketEdit}>
+                                              Cancel
+                                            </Button>
+                                          </>
                                         ) : (
-                                          formatTicketLimit(ticket.uses_limit)
-                                        )}
-                                      </Table.Td>
-                                      <Table.Td>
-                                        {editingTicketName === ticket.name ? (
-                                          <TextInput
-                                            value={ticketEditForm.lifetimeMinutes}
-                                            onChange={(event) =>
-                                              setTicketEditForm((current) => ({
-                                                ...current,
-                                                lifetimeMinutes: event.currentTarget.value,
-                                              }))
-                                            }
-                                          />
-                                        ) : (
-                                          formatDateTime(ticket.expiration_time)
-                                        )}
-                                      </Table.Td>
-                                      <Table.Td>
-                                        <Group gap="xs" wrap="nowrap">
-                                          {editingTicketName === ticket.name ? (
-                                            <>
+                                          <>
+                                            {ticket.links?.update ? (
                                               <Button
                                                 size="xs"
-                                                onClick={() => submitTicketEdit(ticket)}
-                                                loading={updateTicketMutation.isPending}
+                                                variant="light"
+                                                onClick={() => beginTicketEdit(ticket)}
                                               >
                                                 Update
                                               </Button>
-                                              <Button size="xs" variant="default" onClick={cancelTicketEdit}>
-                                                Cancel
-                                              </Button>
-                                            </>
-                                          ) : (
-                                            <>
-                                              {ticket.links?.update ? (
-                                                <Button
-                                                  size="xs"
-                                                  variant="light"
-                                                  onClick={() => beginTicketEdit(ticket)}
-                                                >
-                                                  Update
-                                                </Button>
-                                              ) : null}
-                                              {ticket.links?.download ? (() => {
-                                                const downloadLink = ticket.links.download
-                                                return (
-                                                  <ActionIcon
-                                                    variant="subtle"
-                                                    color="gray"
-                                                    aria-label={`Copy ticket link for ${ticket.name}`}
-                                                    onClick={() =>
-                                                      void copyText(
-                                                        actionLinkUrl(
-                                                          downloadLink,
-                                                          connection.baseUrl,
-                                                        ),
-                                                        'Ticket link',
-                                                      )
-                                                    }
-                                                  >
-                                                    <IconCopy size={16} />
-                                                  </ActionIcon>
-                                                )
-                                              })() : null}
-                                              {ticket.links?.delete ? (
+                                            ) : null}
+                                            {!isCollection && ticket.links?.download ? (() => {
+                                              const downloadLink = ticket.links.download
+                                              return (
                                                 <ActionIcon
                                                   variant="subtle"
-                                                  color="red"
-                                                  aria-label={`Delete ticket ${ticket.name}`}
-                                                  onClick={() => beginTicketDelete(ticket)}
+                                                  color="gray"
+                                                  aria-label={`Copy ticket link for ${ticket.name}`}
+                                                  onClick={() =>
+                                                    void copyText(
+                                                      actionLinkUrl(
+                                                        downloadLink,
+                                                        connection.baseUrl,
+                                                      ),
+                                                      'Ticket link',
+                                                    )
+                                                  }
                                                 >
-                                                  <IconTrash size={16} />
+                                                  <IconCopy size={16} />
                                                 </ActionIcon>
-                                              ) : null}
-                                            </>
-                                          )}
-                                        </Group>
-                                      </Table.Td>
-                                    </Table.Tr>
-                                  ))
-                                )}
-                              </Table.Tbody>
-                            </Table>
-                          )}
-                        </Stack>
-                      </Card>
-                    </Tabs.Panel>
-                  ) : null}
+                                              )
+                                            })() : null}
+                                            {ticket.links?.delete ? (
+                                              <ActionIcon
+                                                variant="subtle"
+                                                color="red"
+                                                aria-label={`Delete ticket ${ticket.name}`}
+                                                onClick={() => beginTicketDelete(ticket)}
+                                              >
+                                                <IconTrash size={16} />
+                                              </ActionIcon>
+                                            ) : null}
+                                          </>
+                                        )}
+                                      </Group>
+                                    </Table.Td>
+                                  </Table.Tr>
+                                ))
+                              )}
+                            </Table.Tbody>
+                          </Table>
+                        )}
+                      </Stack>
+                    </Card>
+                  </Tabs.Panel>
                 </Tabs>
               </Card>
             </Stack>

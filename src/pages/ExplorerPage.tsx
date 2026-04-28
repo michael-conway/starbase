@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
+  ActionIcon,
+  Anchor,
   Alert,
   Badge,
   Breadcrumbs,
@@ -9,12 +11,13 @@ import {
   Checkbox,
   Group,
   Loader,
+  Modal,
+  Radio,
   Stack,
+  Switch,
   Table,
   Text,
   TextInput,
-  Anchor,
-  ActionIcon,
   ThemeIcon,
   Title,
 } from '@mantine/core'
@@ -22,17 +25,36 @@ import { notifications } from '@mantine/notifications'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   IconAlertCircle,
-  IconDatabase,
+  IconCheck,
   IconDots,
+  IconDatabase,
+  IconEdit,
   IconFile,
   IconFolder,
   IconHome2,
+  IconPlus,
   IconRefresh,
   IconUpload,
+  IconTrash,
+  IconX,
 } from '@tabler/icons-react'
 import { displayName, formatDateTime, homePathForUser } from '../features/explorer'
-import { ApiError, getPath, getPathChildren } from '../lib/irods-rest'
+import { ApiError, createPathChild, deletePath, getPath, getPathChildren, renamePath, type PathEntry } from '../lib/irods-rest'
 import { useSession } from '../providers/session'
+
+type CreateKind = 'collection' | 'data_object'
+
+interface DeleteDialogState {
+  path: string
+  label: string
+  kind: PathEntry['kind']
+}
+
+interface RenameState {
+  path: string
+  draftName: string
+  kind: PathEntry['kind']
+}
 
 function quickLocations(path: string, username?: string) {
   const segments = path.split('/').filter(Boolean)
@@ -73,21 +95,63 @@ export function ExplorerPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const userHomePath = homePathForUser(basicUsername)
   const initialPath = searchParams.get('irods_path')?.trim() || userHomePath
-  const [draftPath, setDraftPath] = useState(initialPath)
-  const [selectedPath, setSelectedPath] = useState(initialPath)
-  const [selectedChildren, setSelectedChildren] = useState<string[]>([])
+  const [draftPathState, setDraftPathState] = useState({
+    sourcePath: initialPath,
+    value: initialPath,
+  })
+  const [selectedChildrenState, setSelectedChildrenState] = useState<{
+    path: string
+    selected: string[]
+  }>({
+    path: initialPath,
+    selected: [],
+  })
+  const [createModalOpen, setCreateModalOpen] = useState(false)
+  const [createKind, setCreateKind] = useState<CreateKind>('collection')
+  const [createName, setCreateName] = useState('new folder')
+  const [createIntermediateCollections, setCreateIntermediateCollections] = useState(false)
+  const [deleteDialog, setDeleteDialog] = useState<DeleteDialogState | null>(null)
+  const [deleteForce, setDeleteForce] = useState(false)
+  const [renameState, setRenameState] = useState<RenameState | null>(null)
+  const selectedPath = initialPath
+  const draftPath =
+    draftPathState.sourcePath === initialPath ? draftPathState.value : initialPath
+  const selectedChildren =
+    selectedChildrenState.path === initialPath ? selectedChildrenState.selected : []
 
-  useEffect(() => {
-    setDraftPath(initialPath)
-    setSelectedPath(initialPath)
-    setSelectedChildren([])
-  }, [initialPath])
+  const setDraftPath = (value: string) => {
+    setDraftPathState({
+      sourcePath: initialPath,
+      value,
+    })
+  }
+
+  const setSelectedChildren = (
+    selected: string[] | ((current: string[]) => string[]),
+  ) => {
+    const nextSelected =
+      typeof selected === 'function' ? selected(selectedChildren) : selected
+
+    setSelectedChildrenState({
+      path: initialPath,
+      selected: nextSelected,
+    })
+  }
+
+  const setCreateDefaults = (kind: CreateKind) => {
+    setCreateKind(kind)
+    setCreateName(kind === 'collection' ? 'new folder' : 'new file')
+    setCreateIntermediateCollections(false)
+  }
 
   const openCollection = (nextPath: string) => {
     const normalized = nextPath.trim() || userHomePath
     setDraftPath(normalized)
-    setSelectedPath(normalized)
     setSearchParams(normalized === userHomePath ? {} : { irods_path: normalized })
+    setSelectedChildrenState({
+      path: normalized,
+      selected: [],
+    })
   }
 
   const openPath = async (nextPath: string) => {
@@ -155,6 +219,131 @@ export function ExplorerPage() {
     },
   })
 
+  const createChildMutation = useMutation({
+    mutationFn: async () => {
+      if (!entry || entry.kind !== 'collection') {
+        throw new ApiError(400, 'Open a collection before creating a child path.')
+      }
+
+      const childName = createName.trim()
+      if (!childName) {
+        throw new ApiError(400, 'Enter a name for the new item.')
+      }
+
+      return createPathChild(
+        entry.path,
+        {
+          child_name: childName,
+          kind: createKind,
+          mkdirs: createKind === 'collection' ? createIntermediateCollections : undefined,
+        },
+        connection.auth,
+        connection.baseUrl,
+      )
+    },
+    onSuccess: (created) => {
+      notifications.show({
+        title: created.kind === 'collection' ? 'Folder created' : 'File created',
+        message: created.path,
+        color: 'teal',
+      })
+      setCreateModalOpen(false)
+      void entryQuery.refetch()
+      void childrenQuery.refetch()
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'Create failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+
+  const deletePathMutation = useMutation({
+    mutationFn: async () => {
+      if (!deleteDialog) {
+        throw new ApiError(400, 'No delete target was selected.')
+      }
+
+      await deletePath(deleteDialog.path, connection.auth, connection.baseUrl, {
+        force: deleteForce,
+      })
+
+      return deleteDialog
+    },
+    onSuccess: (deleted) => {
+      notifications.show({
+        title: deleted.kind === 'collection' ? 'Folder deleted' : 'File deleted',
+        message: deleted.path,
+        color: 'teal',
+      })
+      setSelectedChildren((current) => current.filter((path) => path !== deleted.path))
+      setDeleteDialog(null)
+      setDeleteForce(false)
+      void entryQuery.refetch()
+      void childrenQuery.refetch()
+    },
+    onError: (error: Error) => {
+      if (error instanceof ApiError && error.status === 409) {
+        setDeleteForce(true)
+        notifications.show({
+          title: 'Folder is not empty',
+          message: 'Enable force delete to remove this collection recursively.',
+          color: 'yellow',
+        })
+        return
+      }
+
+      notifications.show({
+        title: 'Delete failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+  const renamePathMutation = useMutation({
+    mutationFn: async () => {
+      if (!renameState) {
+        throw new ApiError(400, 'No rename target was selected.')
+      }
+
+      const newName = renameState.draftName.trim()
+      if (!newName) {
+        throw new ApiError(400, 'Enter a new name.')
+      }
+
+      return renamePath(
+        renameState.path,
+        {
+          new_name: newName,
+        },
+        connection.auth,
+        connection.baseUrl,
+      )
+    },
+    onSuccess: (renamed) => {
+      notifications.show({
+        title: renamed.kind === 'collection' ? 'Folder renamed' : 'File renamed',
+        message: renamed.path,
+        color: 'teal',
+      })
+      setSelectedChildren((current) =>
+        current.map((path) => (path === renameState?.path ? renamed.path : path)),
+      )
+      setRenameState(null)
+      void entryQuery.refetch()
+      void childrenQuery.refetch()
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'Rename failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+
   const entry = entryQuery.data
   const childrenResponse =
     childrenQuery.data?.irods_path === selectedPath ? childrenQuery.data : undefined
@@ -178,8 +367,153 @@ export function ExplorerPage() {
     setSelectedChildren(allChildrenSelected ? [] : children.map((child) => child.path))
   }
 
+  const openCreateModal = (kind: CreateKind) => {
+    setCreateDefaults(kind)
+    setCreateModalOpen(true)
+  }
+
+  const openDeleteDialog = (child: PathEntry) => {
+    const childLabel = child.path_segments.at(-1)?.display_name ?? displayName(child.path)
+    const requiresForce = child.kind === 'collection' && Boolean(child.hasChildren || (child.childCount ?? 0) > 0)
+
+    setDeleteDialog({
+      path: child.path,
+      label: childLabel,
+      kind: child.kind,
+    })
+    setDeleteForce(requiresForce)
+  }
+
+  const beginRename = (child: PathEntry) => {
+    setRenameState({
+      path: child.path,
+      draftName: child.path_segments.at(-1)?.display_name ?? displayName(child.path),
+      kind: child.kind,
+    })
+  }
+
+  const cancelRename = () => {
+    if (!renamePathMutation.isPending) {
+      setRenameState(null)
+    }
+  }
+
+  const updateRenameDraft = (draftName: string) => {
+    setRenameState((current) => (current ? { ...current, draftName } : current))
+  }
+
   return (
     <div className="explorer-layout">
+      <Modal
+        opened={createModalOpen}
+        onClose={() => {
+          if (!createChildMutation.isPending) {
+            setCreateModalOpen(false)
+          }
+        }}
+        title={createKind === 'collection' ? 'New folder' : 'New file'}
+        centered
+      >
+        <Stack gap="md">
+          <Radio.Group
+            label="Create"
+            value={createKind}
+            onChange={(value) => setCreateDefaults(value as CreateKind)}
+          >
+            <Group mt="xs">
+              <Radio value="collection" label="Folder" />
+              <Radio value="data_object" label="File" />
+            </Group>
+          </Radio.Group>
+
+          <TextInput
+            label="Name"
+            value={createName}
+            onChange={(event) => setCreateName(event.currentTarget.value)}
+            placeholder={createKind === 'collection' ? 'new folder' : 'new file'}
+            autoFocus
+          />
+
+          {createKind === 'collection' ? (
+            <Switch
+              label="Create intermediate folders"
+              checked={createIntermediateCollections}
+              onChange={(event) =>
+                setCreateIntermediateCollections(event.currentTarget.checked)
+              }
+            />
+          ) : null}
+
+          <Group justify="flex-end">
+            <Button
+              variant="default"
+              onClick={() => setCreateModalOpen(false)}
+              disabled={createChildMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => createChildMutation.mutate()}
+              loading={createChildMutation.isPending}
+            >
+              Create
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={deleteDialog !== null}
+        onClose={() => {
+          if (!deletePathMutation.isPending) {
+            setDeleteDialog(null)
+            setDeleteForce(false)
+          }
+        }}
+        title={deleteDialog?.kind === 'collection' ? 'Delete folder' : 'Delete file'}
+        centered
+      >
+        <Stack gap="md">
+          <Text>
+            Delete <strong>{deleteDialog?.label}</strong>?
+          </Text>
+
+          {deleteDialog?.kind === 'collection' ? (
+            <>
+              <Text size="sm" c="dimmed">
+                Non-empty collections require force delete, which removes the folder
+                recursively.
+              </Text>
+              <Switch
+                label="Force recursive delete"
+                checked={deleteForce}
+                onChange={(event) => setDeleteForce(event.currentTarget.checked)}
+              />
+            </>
+          ) : null}
+
+          <Group justify="flex-end">
+            <Button
+              variant="default"
+              onClick={() => {
+                setDeleteDialog(null)
+                setDeleteForce(false)
+              }}
+              disabled={deletePathMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              color="red"
+              onClick={() => deletePathMutation.mutate()}
+              loading={deletePathMutation.isPending}
+            >
+              Delete
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
       <Card shadow="sm" radius="xl" padding="lg" className="explorer-sidebar">
         <Stack gap="lg">
           <div>
@@ -233,6 +567,22 @@ export function ExplorerPage() {
           </Breadcrumbs>
 
           <div className="explorer-menubar">
+            <Button
+              leftSection={<IconPlus size={16} />}
+              variant="light"
+              onClick={() => openCreateModal('collection')}
+              disabled={entry?.kind !== 'collection'}
+            >
+              New folder
+            </Button>
+            <Button
+              leftSection={<IconPlus size={16} />}
+              variant="light"
+              onClick={() => openCreateModal('data_object')}
+              disabled={entry?.kind !== 'collection'}
+            >
+              New file
+            </Button>
             <Button leftSection={<IconUpload size={16} />} variant="default">
               Upload
             </Button>
@@ -244,10 +594,18 @@ export function ExplorerPage() {
             >
               Refresh
             </Button>
+            <Button
+              leftSection={<IconDots size={16} />}
+              variant="light"
+              onClick={() => openDetails(selectedPath)}
+              disabled={entry?.kind !== 'collection'}
+            >
+              Collection details
+            </Button>
             <TextInput
               placeholder={userHomePath}
               value={draftPath}
-              onChange={(event) => setDraftPath(event.currentTarget.value)}
+                  onChange={(event) => setDraftPath(event.currentTarget.value)}
               className="explorer-path-input"
             />
             <Button onClick={() => void openPath(draftPath)}>Open path</Button>
@@ -308,14 +666,21 @@ export function ExplorerPage() {
                   </Table.Tr>
                 ) : null}
                 {children.map((child) => (
+                  (() => {
+                    const isRenaming = renameState?.path === child.path
+                    return (
                   <Table.Tr
                     key={child.path}
                     className={`explorer-clickable-row${
                       selectedChildren.includes(child.path) ? ' explorer-row-selected' : ''
                     }`}
-                    onClick={() => void openPath(child.path)}
+                    onClick={() => {
+                      if (!isRenaming) {
+                        void openPath(child.path)
+                      }
+                    }}
                     onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
+                      if (!isRenaming && (event.key === 'Enter' || event.key === ' ')) {
                         event.preventDefault()
                         void openPath(child.path)
                       }
@@ -344,35 +709,109 @@ export function ExplorerPage() {
                       </ThemeIcon>
                     </Table.Td>
                     <Table.Td>
-                      <Anchor
-                        fw={600}
-                        underline="never"
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          void openPath(child.path)
-                        }}
-                      >
-                        {child.path_segments.at(-1)?.display_name ?? displayName(child.path)}
-                      </Anchor>
+                      {isRenaming ? (
+                        <TextInput
+                          value={renameState.draftName}
+                          onChange={(event) => updateRenameDraft(event.currentTarget.value)}
+                          onClick={(event) => event.stopPropagation()}
+                          onKeyDown={(event) => {
+                            event.stopPropagation()
+                            if (event.key === 'Enter') {
+                              event.preventDefault()
+                              renamePathMutation.mutate()
+                            }
+                            if (event.key === 'Escape') {
+                              event.preventDefault()
+                              cancelRename()
+                            }
+                          }}
+                          autoFocus
+                        />
+                      ) : (
+                        <Anchor
+                          fw={600}
+                          underline="never"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            void openPath(child.path)
+                          }}
+                        >
+                          {child.path_segments.at(-1)?.display_name ?? displayName(child.path)}
+                        </Anchor>
+                      )}
                     </Table.Td>
                     <Table.Td>{child.kind === 'data_object' ? 'file' : 'folder'}</Table.Td>
                     <Table.Td>{child.kind === 'data_object' ? (child.display_size ?? '—') : '—'}</Table.Td>
                     <Table.Td>{formatDateTime(child.created_at)}</Table.Td>
                     <Table.Td>{formatDateTime(child.updated_at)}</Table.Td>
                     <Table.Td>
-                      <ActionIcon
-                        variant="subtle"
-                        color="gray"
-                        aria-label={`Open details for ${displayName(child.path)}`}
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          openDetails(child.path)
-                        }}
-                      >
-                        <IconDots size={16} />
-                      </ActionIcon>
+                      <Group gap={4} wrap="nowrap">
+                        {isRenaming ? (
+                          <>
+                            <ActionIcon
+                              variant="subtle"
+                              color="teal"
+                              aria-label={`Save rename for ${displayName(child.path)}`}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                renamePathMutation.mutate()
+                              }}
+                              loading={renamePathMutation.isPending}
+                            >
+                              <IconCheck size={16} />
+                            </ActionIcon>
+                            <ActionIcon
+                              variant="subtle"
+                              color="gray"
+                              aria-label={`Cancel rename for ${displayName(child.path)}`}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                cancelRename()
+                              }}
+                            >
+                              <IconX size={16} />
+                            </ActionIcon>
+                          </>
+                        ) : (
+                          <ActionIcon
+                            variant="subtle"
+                            color="gray"
+                            aria-label={`Rename ${displayName(child.path)}`}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              beginRename(child)
+                            }}
+                          >
+                            <IconEdit size={16} />
+                          </ActionIcon>
+                        )}
+                        <ActionIcon
+                          variant="subtle"
+                          color="red"
+                          aria-label={`Delete ${displayName(child.path)}`}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            openDeleteDialog(child)
+                          }}
+                        >
+                          <IconTrash size={16} />
+                        </ActionIcon>
+                        <ActionIcon
+                          variant="subtle"
+                          color="gray"
+                          aria-label={`Open details for ${displayName(child.path)}`}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            openDetails(child.path)
+                          }}
+                        >
+                          <IconDots size={16} />
+                        </ActionIcon>
+                      </Group>
                     </Table.Td>
                   </Table.Tr>
+                    )
+                  })()
                 ))}
                 {!children.length && !childrenQuery.isLoading && !listingError ? (
                   <Table.Tr>
