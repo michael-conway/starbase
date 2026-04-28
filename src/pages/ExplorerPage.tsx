@@ -41,6 +41,7 @@ import {
 import { displayName, formatDateTime, homePathForUser } from '../features/explorer'
 import { ApiError, createPathChild, deletePath, getPath, getPathChildren, renamePath, type PathEntry } from '../lib/irods-rest'
 import { useSession } from '../providers/session'
+import { useUploadManager } from '../providers/upload-context'
 
 type CreateKind = 'collection' | 'data_object'
 
@@ -113,6 +114,8 @@ export function ExplorerPage() {
   const [deleteDialog, setDeleteDialog] = useState<DeleteDialogState | null>(null)
   const [deleteForce, setDeleteForce] = useState(false)
   const [renameState, setRenameState] = useState<RenameState | null>(null)
+  const [dropTargetPath, setDropTargetPath] = useState<string | null>(null)
+  const { requestFilesUpload, openFilePicker } = useUploadManager()
   const selectedPath = initialPath
   const draftPath =
     draftPathState.sourcePath === initialPath ? draftPathState.value : initialPath
@@ -384,6 +387,20 @@ export function ExplorerPage() {
     setDeleteForce(requiresForce)
   }
 
+  const canHandleDragFiles = (event: React.DragEvent) =>
+    Array.from(event.dataTransfer.types).includes('Files')
+
+  const startUploadToPath = (files: File[], targetPath: string, targetLabel?: string) => {
+    if (files.length === 0) {
+      return
+    }
+
+    requestFilesUpload(files, {
+      targetPath,
+      targetLabel,
+    })
+  }
+
   const beginRename = (child: PathEntry) => {
     setRenameState({
       path: child.path,
@@ -538,7 +555,40 @@ export function ExplorerPage() {
         </Stack>
       </Card>
 
-      <Card shadow="sm" radius="xl" padding="lg" className="explorer-main explorer-main-wide">
+      <Card
+        shadow="sm"
+        radius="xl"
+        padding="lg"
+        className={`explorer-main explorer-main-wide${
+          dropTargetPath === selectedPath ? ' explorer-drop-target-active' : ''
+        }`}
+        onDragOver={(event) => {
+          if (entry?.kind !== 'collection' || !canHandleDragFiles(event)) {
+            return
+          }
+
+          event.preventDefault()
+          setDropTargetPath(selectedPath)
+        }}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+            setDropTargetPath((current) => (current === selectedPath ? null : current))
+          }
+        }}
+        onDrop={(event) => {
+          if (entry?.kind !== 'collection') {
+            return
+          }
+
+          event.preventDefault()
+          setDropTargetPath(null)
+          startUploadToPath(
+            Array.from(event.dataTransfer.files),
+            selectedPath,
+            displayName(selectedPath),
+          )
+        }}
+      >
         <Stack gap="md">
           <Group justify="space-between" align="center">
             <div>
@@ -583,7 +633,17 @@ export function ExplorerPage() {
             >
               New file
             </Button>
-            <Button leftSection={<IconUpload size={16} />} variant="default">
+            <Button
+              leftSection={<IconUpload size={16} />}
+              variant="default"
+              onClick={() =>
+                openFilePicker({
+                  targetPath: selectedPath,
+                  targetLabel: displayName(selectedPath),
+                })
+              }
+              disabled={entry?.kind !== 'collection'}
+            >
               Upload
             </Button>
             <Button
@@ -668,11 +728,15 @@ export function ExplorerPage() {
                 {children.map((child) => (
                   (() => {
                     const isRenaming = renameState?.path === child.path
+                    const isCollectionDropTarget =
+                      child.kind === 'collection' && dropTargetPath === child.path
                     return (
                   <Table.Tr
                     key={child.path}
                     className={`explorer-clickable-row${
                       selectedChildren.includes(child.path) ? ' explorer-row-selected' : ''
+                    }${isCollectionDropTarget ? ' explorer-row-drop-target' : ''}${
+                      child.kind === 'collection' ? ' explorer-collection-row' : ''
                     }`}
                     onClick={() => {
                       if (!isRenaming) {
@@ -686,6 +750,38 @@ export function ExplorerPage() {
                       }
                     }}
                     tabIndex={0}
+                    onDragOver={(event) => {
+                      if (child.kind !== 'collection' || !canHandleDragFiles(event)) {
+                        return
+                      }
+
+                      event.preventDefault()
+                      event.stopPropagation()
+                      setDropTargetPath(child.path)
+                    }}
+                    onDragLeave={(event) => {
+                      if (child.kind !== 'collection') {
+                        return
+                      }
+
+                      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                        setDropTargetPath((current) => (current === child.path ? null : current))
+                      }
+                    }}
+                    onDrop={(event) => {
+                      if (child.kind !== 'collection') {
+                        return
+                      }
+
+                      event.preventDefault()
+                      event.stopPropagation()
+                      setDropTargetPath(null)
+                      startUploadToPath(
+                        Array.from(event.dataTransfer.files),
+                        child.path,
+                        child.path_segments.at(-1)?.display_name ?? displayName(child.path),
+                      )
+                    }}
                   >
                     <Table.Td>
                       <Checkbox

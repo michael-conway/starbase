@@ -63,6 +63,7 @@ import {
   updateTicket,
 } from '../lib/irods-rest'
 import { useSession } from '../providers/session'
+import { useUploadManager } from '../providers/upload-context'
 
 interface DeleteDialogState {
   path: string
@@ -203,6 +204,7 @@ function formatTicketLimit(value?: number) {
 
 export function ExplorerDetailsPage() {
   const { connection } = useSession()
+  const { openFilePicker } = useUploadManager()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const irodsPath = searchParams.get('irods_path')?.trim() ?? ''
@@ -1012,7 +1014,19 @@ export function ExplorerDetailsPage() {
                       <DetailsDownloadButton path={detailsQuery.data.path} />
                     ) : null}
                     {isDataObject ? (
-                      <Button variant="default" leftSection={<IconUpload size={14} />}>
+                      <Button
+                        variant="default"
+                        leftSection={<IconUpload size={14} />}
+                        onClick={() =>
+                          openFilePicker({
+                            targetPath: detailsQuery.data.parent?.irods_path ?? '/',
+                            targetLabel: detailsQuery.data.parent?.irods_path ?? '/',
+                            targetFileName: displayName(detailsQuery.data.path),
+                            overwriteDefault: true,
+                            allowMultiple: false,
+                          })
+                        }
+                      >
                         Replace object
                       </Button>
                     ) : null}

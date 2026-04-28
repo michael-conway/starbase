@@ -80,6 +80,13 @@ body {
   min-height: 640px;
 }
 
+.explorer-drop-target-active {
+  border: 1px dashed rgba(15, 118, 110, 0.6);
+  background:
+    linear-gradient(135deg, rgba(15, 118, 110, 0.06), rgba(255, 255, 255, 0.92)),
+    #fff;
+}
+
 .explorer-menubar {
   display: flex;
   gap: 12px;
@@ -105,6 +112,45 @@ body {
 
 .explorer-clickable-row:hover td {
   background: rgba(15, 118, 110, 0.05);
+}
+
+.explorer-row-drop-target td {
+  background: rgba(15, 118, 110, 0.14);
+}
+
+.upload-dock {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  width: min(380px, calc(100vw - 32px));
+  max-height: min(65vh, 560px);
+  overflow: auto;
+  z-index: 220;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(18px);
+  border: 1px solid var(--app-border);
+  box-shadow: 0 20px 48px rgba(15, 23, 42, 0.16);
+}
+
+.upload-dock-item {
+  padding: 10px 12px;
+  border: 1px solid var(--app-border);
+  border-radius: 14px;
+  background: rgba(248, 251, 252, 0.84);
+}
+
+.upload-spinner {
+  animation: upload-spin 1s linear infinite;
+}
+
+@keyframes upload-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .details-header-main {
@@ -183,5 +229,11 @@ body {
 
   .details-header-layout {
     grid-template-columns: 1fr;
+  }
+
+  .upload-dock {
+    right: 12px;
+    bottom: 12px;
+    width: calc(100vw - 24px);
   }
 }

@@ -176,6 +176,25 @@ export interface ResourceCollectionResponse {
   }
 }
 
+export interface PathContentsUploadResponse {
+  path: string
+  parent_path: string
+  file_name: string
+  action: 'created' | 'replaced'
+  size: number
+  checksum?: {
+    requested: boolean
+    verified: boolean
+    algorithm?: string
+    value?: string
+  }
+  links?: {
+    path?: ActionLink
+    contents?: ActionLink
+    parent?: ActionLink
+  }
+}
+
 export interface ApiErrorPayload {
   code: string
   message: string
@@ -267,6 +286,14 @@ function parseFilenameFromContentDisposition(value: string | null) {
   return plainMatch?.[1]
 }
 
+function buildApiError(status: number, payload?: ApiErrorPayload | null) {
+  return new ApiError(
+    status,
+    payload?.message ?? `Request failed with status ${status}`,
+    payload?.code,
+  )
+}
+
 async function request<T>(
   path: string,
   options?: {
@@ -296,11 +323,7 @@ async function request<T>(
       // Fall back to the HTTP status when the response body is not JSON.
     }
 
-    throw new ApiError(
-      response.status,
-      payload?.message ?? `Request failed with status ${response.status}`,
-      payload?.code,
-    )
+    throw buildApiError(response.status, payload)
   }
 
   return (await response.json()) as T
@@ -409,11 +432,7 @@ export async function deletePath(
       // Fall back to the HTTP status when the response body is not JSON.
     }
 
-    throw new ApiError(
-      response.status,
-      payload?.message ?? `Request failed with status ${response.status}`,
-      payload?.code,
-    )
+    throw buildApiError(response.status, payload)
   }
 }
 
@@ -431,6 +450,94 @@ export function renamePath(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(payload),
+  })
+}
+
+export function uploadPathContents(
+  payload: {
+    parent_path: string
+    file_name: string
+    content: File
+    checksum?: boolean
+    overwrite?: boolean
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: {
+    onProgress?: (progress: { loaded: number; total: number }) => void
+    signal?: AbortSignal
+  },
+) {
+  return new Promise<PathContentsUploadResponse>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    const formData = new FormData()
+
+    formData.set('parent_path', payload.parent_path)
+    formData.set('file_name', payload.file_name)
+    formData.set('content', payload.content)
+
+    if (payload.checksum !== undefined) {
+      formData.set('checksum', `${payload.checksum}`)
+    }
+
+    if (payload.overwrite !== undefined) {
+      formData.set('overwrite', `${payload.overwrite}`)
+    }
+
+    xhr.open('POST', buildUrl('/api/v1/path/contents', baseUrl))
+
+    const headers = buildHeaders(auth)
+    for (const [key, value] of Object.entries(headers ?? {})) {
+      xhr.setRequestHeader(key, value)
+    }
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        options?.onProgress?.({
+          loaded: event.loaded,
+          total: event.total,
+        })
+      }
+    }
+
+    xhr.onerror = () => {
+      reject(new ApiError(0, 'Upload failed because the network request could not be completed.'))
+    }
+
+    xhr.onabort = () => {
+      reject(new ApiError(0, 'Upload was cancelled.'))
+    }
+
+    xhr.onload = () => {
+      const responseText = xhr.responseText?.trim() ?? ''
+      let parsedPayload: unknown = null
+
+      if (responseText) {
+        try {
+          parsedPayload = JSON.parse(responseText)
+        } catch {
+          parsedPayload = null
+        }
+      }
+
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(parsedPayload as PathContentsUploadResponse)
+        return
+      }
+
+      reject(buildApiError(xhr.status, (parsedPayload as ApiErrorPayload | null) ?? null))
+    }
+
+    if (options?.signal) {
+      if (options.signal.aborted) {
+        xhr.abort()
+        return
+      }
+
+      options.signal.addEventListener('abort', () => xhr.abort(), { once: true })
+    }
+
+    xhr.send(formData)
   })
 }
 
@@ -467,11 +574,7 @@ export async function downloadPath(
       // Fall back to the HTTP status when the response body is not JSON.
     }
 
-    throw new ApiError(
-      response.status,
-      payload?.message ?? `Request failed with status ${response.status}`,
-      payload?.code,
-    )
+    throw buildApiError(response.status, payload)
   }
 
   return {
@@ -512,11 +615,7 @@ export async function deleteAVU(action: ActionLink, auth: RequestAuth, baseUrl?:
       // Fall back to the HTTP status when the response body is not JSON.
     }
 
-    throw new ApiError(
-      response.status,
-      payload?.message ?? `Request failed with status ${response.status}`,
-      payload?.code,
-    )
+    throw buildApiError(response.status, payload)
   }
 }
 

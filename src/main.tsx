@@ -13,6 +13,7 @@ import '@mantine/notifications/styles.css'
 import './index.css'
 import { router } from './router'
 import { SessionProvider } from './providers/session'
+import { UploadProvider } from './providers/upload-provider'
 
 const theme = createTheme({
   primaryColor: 'teal',
@@ -50,7 +51,9 @@ createRoot(document.getElementById('root')!).render(
       <MantineProvider theme={theme} cssVariablesResolver={resolver} defaultColorScheme="light">
         <Notifications position="top-right" />
         <SessionProvider>
-          <RouterProvider router={router} />
+          <UploadProvider>
+            <RouterProvider router={router} />
+          </UploadProvider>
         </SessionProvider>
       </MantineProvider>
     </QueryClientProvider>
