@@ -5,6 +5,7 @@ import App from './App'
 import { primarySections } from './app-sections'
 import { ExplorerDetailsPage } from './pages/ExplorerDetailsPage'
 import { LoginPage } from './pages/LoginPage'
+import { ResourceDetailsPage } from './pages/ResourceDetailsPage'
 import { SetupPage } from './pages/SetupPage'
 import { useSession } from './providers/session'
 
@@ -80,6 +81,10 @@ export const router = createBrowserRouter([
           {
             path: 'explorer/details',
             element: <ExplorerDetailsPage />,
+          },
+          {
+            path: 'resources/details',
+            element: <ResourceDetailsPage />,
           },
           {
             path: 'setup',

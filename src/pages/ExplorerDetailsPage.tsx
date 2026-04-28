@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ActionIcon,
+  Anchor,
   Alert,
   Badge,
   Breadcrumbs,
@@ -525,6 +526,15 @@ export function ExplorerDetailsPage() {
         color: 'red',
       })
     }
+  }
+
+  const openResourceDetails = (resourceName: string) => {
+    const trimmedName = resourceName.trim()
+    if (!trimmedName) {
+      return
+    }
+
+    navigate(`/app/resources/details?name=${encodeURIComponent(trimmedName)}`)
   }
 
   const beginAVUDelete = (avu: {
@@ -1120,6 +1130,17 @@ export function ExplorerDetailsPage() {
                             <InfoRow
                               label="Primary resource"
                               value={detailsQuery.data.resource ?? 'N/A'}
+                              action={
+                                detailsQuery.data.resource ? (
+                                  <Button
+                                    size="xs"
+                                    variant="light"
+                                    onClick={() => openResourceDetails(detailsQuery.data.resource!)}
+                                  >
+                                    Details
+                                  </Button>
+                                ) : undefined
+                              }
                             />
                           </>
                         ) : (
@@ -1182,9 +1203,22 @@ export function ExplorerDetailsPage() {
                                     <Table.Td>{replica.number}</Table.Td>
                                     <Table.Td>
                                       <Stack gap={2}>
-                                        <Text size="sm" fw={600}>
-                                          {replica.resource_name ?? 'N/A'}
-                                        </Text>
+                                        {replica.resource_name ? (
+                                          <Anchor
+                                            size="sm"
+                                            fw={600}
+                                            underline="never"
+                                            onClick={() =>
+                                              openResourceDetails(replica.resource_name!)
+                                            }
+                                          >
+                                            {replica.resource_name}
+                                          </Anchor>
+                                        ) : (
+                                          <Text size="sm" fw={600}>
+                                            N/A
+                                          </Text>
+                                        )}
                                         <Text size="xs" c="dimmed">
                                           {replica.resource_hierarchy ?? 'No hierarchy'}
                                         </Text>

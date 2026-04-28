@@ -41,6 +41,7 @@ export interface PathEntry {
     avus?: ActionLink
     create_avu?: ActionLink
     create_ticket?: ActionLink
+    resources?: ActionLink
     create_child_collection?: ActionLink
     create_child_data_object?: ActionLink
   }
@@ -93,6 +94,7 @@ export interface PathAVUResponse {
     avus?: ActionLink
     create_avu?: ActionLink
     create_ticket?: ActionLink
+    resources?: ActionLink
   }
   avus: AVUEntry[]
   count?: number
@@ -149,6 +151,28 @@ export interface TicketCollectionResponse {
   links?: {
     self?: ActionLink
     create?: ActionLink
+  }
+}
+
+export interface ResourceRecord {
+  id: number
+  name: string
+  zone?: string
+  type?: string
+  class?: string
+  location?: string
+  path?: string
+  context?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface ResourceCollectionResponse {
+  resources: ResourceRecord[]
+  count: number
+  scope: 'top' | 'all'
+  links: {
+    self?: ActionLink
   }
 }
 
@@ -298,6 +322,21 @@ export function getHealth(baseUrl?: string) {
   return request<HealthResponse>('/healthz', { baseUrl })
 }
 
+export function getResources(
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: { scope?: 'top' | 'all' },
+) {
+  const params = new URLSearchParams({
+    scope: options?.scope ?? 'top',
+  })
+
+  return request<ResourceCollectionResponse>(`/api/v1/resource?${params.toString()}`, {
+    auth,
+    baseUrl,
+  })
+}
+
 export function getPath(
   irodsPath: string,
   auth: RequestAuth,
@@ -331,7 +370,7 @@ export function createPathChild(
   auth: RequestAuth,
   baseUrl?: string,
 ) {
-  return request<PathEntry>(`/api/v1/path/children${withPath(parentPath)}`, {
+  return request<PathEntry>(`/api/v1/path${withPath(parentPath)}`, {
     auth,
     baseUrl,
     method: 'POST',
@@ -384,10 +423,10 @@ export function renamePath(
   auth: RequestAuth,
   baseUrl?: string,
 ) {
-  return request<PathEntry>(`/api/v1/path/actions/move${withPath(irodsPath)}`, {
+  return request<PathEntry>(`/api/v1/path${withPath(irodsPath)}`, {
     auth,
     baseUrl,
-    method: 'POST',
+    method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
     },

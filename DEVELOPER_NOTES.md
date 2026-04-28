@@ -111,24 +111,25 @@ Backend route plan to support that sequence:
 
 1. `POST /api/v1/path/contents?irods_path=...`
    Purpose: upload new contents or replace an existing object
-2. `POST /api/v1/path/children?irods_path=...`
+2. `POST /api/v1/path?irods_path=...`
    Purpose: create a child collection beneath a collection path
-3. `GET /api/v1/path/metadata?irods_path=...`
+3. `PATCH /api/v1/path?irods_path=...`
+   Purpose: rename a file or collection in place within its current parent collection
+4. `GET /api/v1/path/metadata?irods_path=...`
    Purpose: retrieve metadata as an explicit subresource
-4. `PUT /api/v1/path/metadata?irods_path=...`
+5. `PUT /api/v1/path/metadata?irods_path=...`
    Purpose: add or update metadata
-5. `DELETE /api/v1/path/metadata?irods_path=...`
+6. `DELETE /api/v1/path/metadata?irods_path=...`
    Purpose: remove metadata entries
-6. `DELETE /api/v1/path?irods_path=...`
+7. `DELETE /api/v1/path?irods_path=...`
    Purpose: delete a collection or object by canonical path
-7. `GET /api/v1/path/acl?irods_path=...`
+8. `GET /api/v1/path/acl?irods_path=...`
    Purpose: inspect access controls
-8. `PUT /api/v1/path/acl?irods_path=...`
+9. `PUT /api/v1/path/acl?irods_path=...`
    Purpose: update access controls
 
 Lower-priority backend exploration:
 
-* `POST /api/v1/path/actions/move`
 * `POST /api/v1/path/actions/copy`
 * preview-oriented routes for browser rendering
 * search routes under a separate query-oriented namespace rather than forcing

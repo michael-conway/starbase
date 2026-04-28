@@ -1,5 +1,6 @@
 import {
   IconFolders,
+  IconServer2,
   IconCode,
   IconSearch,
   IconSettings,
@@ -21,6 +22,13 @@ export const primarySections: AppSectionDefinition[] = [
     icon: IconFolders,
     importPage: () => import('./pages/ExplorerPage'),
     exportName: 'ExplorerPage',
+  },
+  {
+    slug: 'resources',
+    label: 'Resources',
+    icon: IconServer2,
+    importPage: () => import('./pages/ResourcesPage'),
+    exportName: 'ResourcesPage',
   },
 ]
 
