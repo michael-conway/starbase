@@ -34,6 +34,7 @@ import {
   IconFile,
   IconFolder,
   IconFingerprint,
+  IconKey,
   IconTrash,
   IconUpload,
 } from '@tabler/icons-react'
@@ -41,12 +42,18 @@ import { displayName, formatBytes, formatDateTime } from '../features/explorer'
 import {
   addAVU,
   computePathChecksum,
+  createPathTicket,
   deleteAVU,
+  deleteTicket,
   downloadPath,
+  actionLinkUrl,
   getPath,
   getPathAVUs,
+  getTickets,
   type ActionLink,
   type PathEntry,
+  type TicketEntry,
+  updateTicket,
 } from '../lib/irods-rest'
 import { useSession } from '../providers/session'
 
@@ -151,6 +158,30 @@ function filenameFromPath(path: string) {
   return segments.at(-1) ?? 'download'
 }
 
+function ticketCreateAction(entry?: Pick<PathEntry, 'links'>): ActionLink | undefined {
+  const action = entry?.links?.create_ticket
+  if (!action) {
+    return undefined
+  }
+
+  if (action.method?.toUpperCase() === 'GET') {
+    return {
+      ...action,
+      method: 'POST',
+    }
+  }
+
+  return action
+}
+
+function formatTicketLimit(value?: number) {
+  if (value === undefined || value === null) {
+    return '—'
+  }
+
+  return value === 0 ? 'Unlimited' : `${value}`
+}
+
 export function ExplorerDetailsPage() {
   const { connection } = useSession()
   const navigate = useNavigate()
@@ -162,6 +193,16 @@ export function ExplorerDetailsPage() {
     value: '',
     unit: '',
   })
+  const [isAddingTicket, setIsAddingTicket] = useState(false)
+  const [ticketForm, setTicketForm] = useState({
+    maximumUses: '50',
+    lifetimeMinutes: '720',
+  })
+  const [editingTicketName, setEditingTicketName] = useState<string | null>(null)
+  const [ticketEditForm, setTicketEditForm] = useState({
+    maximumUses: '',
+    lifetimeMinutes: '',
+  })
 
   const detailsQuery = useQuery({
     queryKey: ['path-detail', irodsPath, connection],
@@ -171,6 +212,11 @@ export function ExplorerDetailsPage() {
   const avuQuery = useQuery({
     queryKey: ['path-avus', irodsPath, connection],
     queryFn: () => getPathAVUs(irodsPath, connection.auth, connection.baseUrl),
+    enabled: Boolean(irodsPath),
+  })
+  const ticketsQuery = useQuery({
+    queryKey: ['tickets', connection],
+    queryFn: () => getTickets(connection.auth, connection.baseUrl),
     enabled: Boolean(irodsPath),
   })
   const checksumMutation = useMutation({
@@ -243,8 +289,101 @@ export function ExplorerDetailsPage() {
       })
     },
   })
+  const createTicketMutation = useMutation({
+    mutationFn: (input: {
+      href: ActionLink
+      maximum_uses?: number
+      lifetime_minutes?: number
+    }) => createPathTicket(input.href, input, connection.auth, connection.baseUrl),
+    onSuccess: async () => {
+      notifications.show({
+        title: 'Ticket created',
+        message: 'Anonymous access ticket created.',
+        color: 'teal',
+      })
+      await ticketsQuery.refetch()
+    },
+    onError: async (error: Error) => {
+      const normalizedMessage = error.message.toLowerCase()
+      const shouldSuggestRefresh =
+        normalizedMessage.includes('ticket') &&
+        normalizedMessage.includes('not found')
+
+      notifications.show({
+        title: shouldSuggestRefresh ? 'Ticket may already exist' : 'Ticket create failed',
+        message: shouldSuggestRefresh
+          ? 'The server did not return the created ticket cleanly. Refresh the ticket list and check whether the new ticket already appears.'
+          : error.message,
+        color: shouldSuggestRefresh ? 'yellow' : 'red',
+      })
+
+      if (shouldSuggestRefresh) {
+        await ticketsQuery.refetch()
+      }
+    },
+  })
+  const updateTicketMutation = useMutation({
+    mutationFn: (input: {
+      href: ActionLink
+      maximum_uses?: number
+      lifetime_minutes?: number
+    }) => updateTicket(input.href, input, connection.auth, connection.baseUrl),
+    onSuccess: async () => {
+      notifications.show({
+        title: 'Ticket updated',
+        message: 'Ticket restrictions updated.',
+        color: 'teal',
+      })
+      setEditingTicketName(null)
+      await ticketsQuery.refetch()
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'Ticket update failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+  const deleteTicketMutation = useMutation({
+    mutationFn: (input: { href: ActionLink }) =>
+      deleteTicket(input.href, connection.auth, connection.baseUrl),
+    onSuccess: async () => {
+      notifications.show({
+        title: 'Ticket deleted',
+        message: 'Ticket removed.',
+        color: 'teal',
+      })
+      await ticketsQuery.refetch()
+    },
+    onError: async (error: Error) => {
+      const normalizedMessage = error.message.toLowerCase()
+      const shouldSuggestRefresh =
+        normalizedMessage.includes('ticket') &&
+        normalizedMessage.includes('not found')
+
+      notifications.show({
+        title: shouldSuggestRefresh ? 'Ticket may already be gone' : 'Ticket delete failed',
+        message: shouldSuggestRefresh
+          ? 'The server reported that the ticket was not found. Refreshing the ticket list to confirm the current state.'
+          : error.message,
+        color: shouldSuggestRefresh ? 'yellow' : 'red',
+      })
+
+      if (shouldSuggestRefresh) {
+        await ticketsQuery.refetch()
+      }
+    },
+  })
 
   const breadcrumbs = useMemo(() => detailsQuery.data?.path_segments ?? [], [detailsQuery.data])
+  const ticketsForPath = useMemo(
+    () =>
+      (ticketsQuery.data?.tickets ?? []).filter(
+        (ticket) => ticket.irods_path?.trim() === irodsPath,
+      ),
+    [ticketsQuery.data, irodsPath],
+  )
   const backPath = useMemo(() => {
     if (!detailsQuery.data) {
       return ''
@@ -255,11 +394,20 @@ export function ExplorerDetailsPage() {
       : (detailsQuery.data.parent?.irods_path ?? '')
   }, [detailsQuery.data])
 
-  const copyText = async (value: string) => {
+  const copyText = async (value: string, label: string) => {
     try {
       await navigator.clipboard.writeText(value)
+      notifications.show({
+        title: 'Copied',
+        message: `${label} was copied.`,
+        color: 'teal',
+      })
     } catch {
-      // Ignore clipboard failures for now.
+      notifications.show({
+        title: 'Copy failed',
+        message: `Unable to copy ${label.toLowerCase()}.`,
+        color: 'red',
+      })
     }
   }
 
@@ -335,6 +483,114 @@ export function ExplorerDetailsPage() {
         },
       },
     )
+  }
+
+  const beginTicketAdd = () => {
+    if (!ticketCreateAction(detailsQuery.data)) {
+      return
+    }
+
+    setIsAddingTicket(true)
+    setTicketForm({
+      maximumUses: '50',
+      lifetimeMinutes: '720',
+    })
+  }
+
+  const cancelTicketAdd = () => {
+    setIsAddingTicket(false)
+    setTicketForm({
+      maximumUses: '50',
+      lifetimeMinutes: '720',
+    })
+  }
+
+  const submitTicketAdd = () => {
+    const action = ticketCreateAction(detailsQuery.data)
+    if (!action) {
+      return
+    }
+
+    const maximumUses = Number.parseInt(ticketForm.maximumUses.trim() || '0', 10)
+    const lifetimeMinutes = Number.parseInt(ticketForm.lifetimeMinutes.trim() || '0', 10)
+
+    if (Number.isNaN(maximumUses) || maximumUses < 0 || Number.isNaN(lifetimeMinutes) || lifetimeMinutes < 0) {
+      notifications.show({
+        title: 'Ticket is invalid',
+        message: 'Maximum uses and lifetime minutes must be zero or greater integers.',
+        color: 'red',
+      })
+      return
+    }
+
+    createTicketMutation.mutate(
+      {
+        href: action,
+        maximum_uses: maximumUses,
+        lifetime_minutes: lifetimeMinutes,
+      },
+      {
+        onSuccess: async () => {
+          cancelTicketAdd()
+          await ticketsQuery.refetch()
+        },
+      },
+    )
+  }
+
+  const beginTicketEdit = (ticket: TicketEntry) => {
+    setEditingTicketName(ticket.name)
+    setTicketEditForm({
+      maximumUses: `${ticket.uses_limit ?? 0}`,
+      lifetimeMinutes: ticket.expiration_time ? '720' : '0',
+    })
+  }
+
+  const cancelTicketEdit = () => {
+    setEditingTicketName(null)
+    setTicketEditForm({
+      maximumUses: '',
+      lifetimeMinutes: '',
+    })
+  }
+
+  const submitTicketEdit = (ticket: TicketEntry) => {
+    if (!ticket.links?.update) {
+      return
+    }
+
+    const maximumUses = Number.parseInt(ticketEditForm.maximumUses.trim() || '0', 10)
+    const lifetimeMinutes = Number.parseInt(ticketEditForm.lifetimeMinutes.trim() || '0', 10)
+
+    if (Number.isNaN(maximumUses) || maximumUses < 0 || Number.isNaN(lifetimeMinutes) || lifetimeMinutes < 0) {
+      notifications.show({
+        title: 'Ticket update is invalid',
+        message: 'Maximum uses and lifetime minutes must be zero or greater integers.',
+        color: 'red',
+      })
+      return
+    }
+
+    updateTicketMutation.mutate({
+      href: ticket.links.update,
+      maximum_uses: maximumUses,
+      lifetime_minutes: lifetimeMinutes,
+    })
+  }
+
+  const beginTicketDelete = (ticket: TicketEntry) => {
+    if (!ticket.links?.delete) {
+      return
+    }
+
+    const confirmed = window.confirm(`Delete ticket "${ticket.name}"?`)
+    if (!confirmed) {
+      return
+    }
+
+    deleteTicketMutation.mutate({
+      href: ticket.links.delete,
+    })
   }
 
   if (!irodsPath) {
@@ -456,7 +712,7 @@ export function ExplorerDetailsPage() {
                             variant="subtle"
                             color="gray"
                             aria-label="Copy path"
-                            onClick={() => void copyText(detailsQuery.data.path)}
+                            onClick={() => void copyText(detailsQuery.data.path, 'Path')}
                           >
                             <IconCopy size={16} />
                           </ActionIcon>
@@ -535,6 +791,9 @@ export function ExplorerDetailsPage() {
                     <Tabs.Tab value="overview">Overview</Tabs.Tab>
                     <Tabs.Tab value="storage">Storage</Tabs.Tab>
                     <Tabs.Tab value="avus">AVUs</Tabs.Tab>
+                    {detailsQuery.data.kind === 'data_object' ? (
+                      <Tabs.Tab value="tickets">Tickets</Tabs.Tab>
+                    ) : null}
                   </Tabs.List>
 
                   <Tabs.Panel value="overview" pt="md">
@@ -550,7 +809,7 @@ export function ExplorerDetailsPage() {
                               variant="subtle"
                               color="gray"
                               aria-label="Copy path"
-                              onClick={() => void copyText(detailsQuery.data.path)}
+                              onClick={() => void copyText(detailsQuery.data.path, 'Path')}
                             >
                               <IconCopy size={16} />
                             </ActionIcon>
@@ -692,7 +951,7 @@ export function ExplorerDetailsPage() {
                                             color="gray"
                                             aria-label="Copy physical path"
                                             onClick={() =>
-                                              void copyText(replica.physical_path!)
+                                              void copyText(replica.physical_path!, 'Physical path')
                                             }
                                           >
                                             <IconCopy size={16} />
@@ -839,6 +1098,244 @@ export function ExplorerDetailsPage() {
                       </Stack>
                     </Card>
                   </Tabs.Panel>
+
+                  {detailsQuery.data.kind === 'data_object' ? (
+                    <Tabs.Panel value="tickets" pt="md">
+                      <Card shadow="sm" radius="xl" padding="lg">
+                        <Stack gap="sm">
+                          <Group gap="xs" justify="space-between">
+                            <Group gap="xs">
+                              <ThemeIcon variant="light" color="violet" size="md">
+                                <IconKey size={14} />
+                              </ThemeIcon>
+                              <Title order={4}>Tickets</Title>
+                            </Group>
+                            {ticketCreateAction(detailsQuery.data) ? (
+                              <Button
+                                size="xs"
+                                variant="light"
+                                leftSection={<IconPlus size={14} />}
+                                loading={createTicketMutation.isPending}
+                                onClick={beginTicketAdd}
+                                disabled={isAddingTicket}
+                              >
+                                Add ticket
+                              </Button>
+                            ) : null}
+                          </Group>
+
+                          {ticketsQuery.isError ? (
+                            <Alert
+                              color="red"
+                              variant="light"
+                              icon={<IconAlertCircle size={18} />}
+                              title="Unable to load tickets"
+                            >
+                              {ticketsQuery.error.message}
+                            </Alert>
+                          ) : (
+                            <Table highlightOnHover verticalSpacing="sm">
+                              <Table.Thead>
+                                <Table.Tr>
+                                  <Table.Th>Name</Table.Th>
+                                  <Table.Th>Bearer token</Table.Th>
+                                  <Table.Th>Uses</Table.Th>
+                                  <Table.Th>Expires</Table.Th>
+                                  <Table.Th>Actions</Table.Th>
+                                </Table.Tr>
+                              </Table.Thead>
+                              <Table.Tbody>
+                                {ticketsQuery.isLoading ? (
+                                  <Table.Tr>
+                                    <Table.Td colSpan={5}>
+                                      <Text size="sm" c="dimmed">
+                                        Loading tickets...
+                                      </Text>
+                                    </Table.Td>
+                                  </Table.Tr>
+                                ) : isAddingTicket ? (
+                                  <Table.Tr className="explorer-row-selected">
+                                    <Table.Td>
+                                      <Text size="sm" c="dimmed">
+                                        New ticket
+                                      </Text>
+                                    </Table.Td>
+                                    <Table.Td>
+                                      <Text size="sm" c="dimmed">
+                                        Generated by server
+                                      </Text>
+                                    </Table.Td>
+                                    <Table.Td>
+                                      <TextInput
+                                        placeholder="50"
+                                        value={ticketForm.maximumUses}
+                                        onChange={(event) =>
+                                          setTicketForm((current) => ({
+                                            ...current,
+                                            maximumUses: event.currentTarget.value,
+                                          }))
+                                        }
+                                      />
+                                    </Table.Td>
+                                    <Table.Td>
+                                      <TextInput
+                                        placeholder="720"
+                                        value={ticketForm.lifetimeMinutes}
+                                        onChange={(event) =>
+                                          setTicketForm((current) => ({
+                                            ...current,
+                                            lifetimeMinutes: event.currentTarget.value,
+                                          }))
+                                        }
+                                      />
+                                    </Table.Td>
+                                    <Table.Td>
+                                      <Group gap="xs" wrap="nowrap">
+                                        <Button
+                                          size="xs"
+                                          onClick={submitTicketAdd}
+                                          loading={createTicketMutation.isPending}
+                                        >
+                                          Create
+                                        </Button>
+                                        <Button size="xs" variant="default" onClick={cancelTicketAdd}>
+                                          Cancel
+                                        </Button>
+                                      </Group>
+                                    </Table.Td>
+                                  </Table.Tr>
+                                ) : ticketsForPath.length === 0 ? (
+                                  <Table.Tr>
+                                    <Table.Td colSpan={5}>
+                                      <Text size="sm" c="dimmed">
+                                        No tickets returned for this path.
+                                      </Text>
+                                    </Table.Td>
+                                  </Table.Tr>
+                                ) : (
+                                  ticketsForPath.map((ticket) => (
+                                    <Table.Tr key={ticket.name}>
+                                      <Table.Td>
+                                        <Code>{ticket.name}</Code>
+                                      </Table.Td>
+                                      <Table.Td>
+                                        <Group gap="xs" wrap="nowrap" align="flex-start">
+                                          <Text size="sm" className="details-code-cell">
+                                            {ticket.bearer_token ?? '—'}
+                                          </Text>
+                                          {ticket.bearer_token ? (
+                                            <ActionIcon
+                                              variant="subtle"
+                                              color="gray"
+                                              aria-label="Copy bearer token"
+                                              onClick={() => void copyText(ticket.bearer_token!, 'Bearer token')}
+                                            >
+                                              <IconCopy size={16} />
+                                            </ActionIcon>
+                                          ) : null}
+                                        </Group>
+                                      </Table.Td>
+                                      <Table.Td>
+                                        {editingTicketName === ticket.name ? (
+                                          <TextInput
+                                            value={ticketEditForm.maximumUses}
+                                            onChange={(event) =>
+                                              setTicketEditForm((current) => ({
+                                                ...current,
+                                                maximumUses: event.currentTarget.value,
+                                              }))
+                                            }
+                                          />
+                                        ) : (
+                                          formatTicketLimit(ticket.uses_limit)
+                                        )}
+                                      </Table.Td>
+                                      <Table.Td>
+                                        {editingTicketName === ticket.name ? (
+                                          <TextInput
+                                            value={ticketEditForm.lifetimeMinutes}
+                                            onChange={(event) =>
+                                              setTicketEditForm((current) => ({
+                                                ...current,
+                                                lifetimeMinutes: event.currentTarget.value,
+                                              }))
+                                            }
+                                          />
+                                        ) : (
+                                          formatDateTime(ticket.expiration_time)
+                                        )}
+                                      </Table.Td>
+                                      <Table.Td>
+                                        <Group gap="xs" wrap="nowrap">
+                                          {editingTicketName === ticket.name ? (
+                                            <>
+                                              <Button
+                                                size="xs"
+                                                onClick={() => submitTicketEdit(ticket)}
+                                                loading={updateTicketMutation.isPending}
+                                              >
+                                                Update
+                                              </Button>
+                                              <Button size="xs" variant="default" onClick={cancelTicketEdit}>
+                                                Cancel
+                                              </Button>
+                                            </>
+                                          ) : (
+                                            <>
+                                              {ticket.links?.update ? (
+                                                <Button
+                                                  size="xs"
+                                                  variant="light"
+                                                  onClick={() => beginTicketEdit(ticket)}
+                                                >
+                                                  Update
+                                                </Button>
+                                              ) : null}
+                                              {ticket.links?.download ? (() => {
+                                                const downloadLink = ticket.links.download
+                                                return (
+                                                  <ActionIcon
+                                                    variant="subtle"
+                                                    color="gray"
+                                                    aria-label={`Copy ticket link for ${ticket.name}`}
+                                                    onClick={() =>
+                                                      void copyText(
+                                                        actionLinkUrl(
+                                                          downloadLink,
+                                                          connection.baseUrl,
+                                                        ),
+                                                        'Ticket link',
+                                                      )
+                                                    }
+                                                  >
+                                                    <IconCopy size={16} />
+                                                  </ActionIcon>
+                                                )
+                                              })() : null}
+                                              {ticket.links?.delete ? (
+                                                <ActionIcon
+                                                  variant="subtle"
+                                                  color="red"
+                                                  aria-label={`Delete ticket ${ticket.name}`}
+                                                  onClick={() => beginTicketDelete(ticket)}
+                                                >
+                                                  <IconTrash size={16} />
+                                                </ActionIcon>
+                                              ) : null}
+                                            </>
+                                          )}
+                                        </Group>
+                                      </Table.Td>
+                                    </Table.Tr>
+                                  ))
+                                )}
+                              </Table.Tbody>
+                            </Table>
+                          )}
+                        </Stack>
+                      </Card>
+                    </Tabs.Panel>
+                  ) : null}
                 </Tabs>
               </Card>
             </Stack>

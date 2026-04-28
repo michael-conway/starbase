@@ -40,6 +40,7 @@ export interface PathEntry {
   links?: {
     avus?: ActionLink
     create_avu?: ActionLink
+    create_ticket?: ActionLink
   }
   path_segments: PathSegmentLink[]
   hasChildren?: boolean
@@ -89,6 +90,7 @@ export interface PathAVUResponse {
   links?: {
     avus?: ActionLink
     create_avu?: ActionLink
+    create_ticket?: ActionLink
   }
   avus: AVUEntry[]
   count?: number
@@ -107,6 +109,45 @@ export interface PathChecksumResponse {
 export interface PathChecksum {
   checksum?: string
   type?: string
+}
+
+export interface TicketLinks {
+  self?: ActionLink
+  update?: ActionLink
+  delete?: ActionLink
+  path?: ActionLink
+  download?: ActionLink
+}
+
+export interface TicketEntry {
+  name: string
+  bearer_token?: string
+  type?: string
+  owner?: string
+  owner_zone?: string
+  object_type?: string
+  irods_path?: string
+  uses_limit?: number
+  uses_count?: number
+  write_file_limit?: number
+  write_file_count?: number
+  write_byte_limit?: number
+  write_byte_count?: number
+  expiration_time?: string
+  links?: TicketLinks
+}
+
+export interface TicketResponse {
+  ticket: TicketEntry
+}
+
+export interface TicketCollectionResponse {
+  tickets: TicketEntry[]
+  count?: number
+  links?: {
+    self?: ActionLink
+    create?: ActionLink
+  }
 }
 
 export interface ApiErrorPayload {
@@ -145,6 +186,19 @@ function resolveBaseUrl(baseUrl?: string) {
 function buildUrl(path: string, baseUrl?: string) {
   const resolvedBaseUrl = resolveBaseUrl(baseUrl)
   return resolvedBaseUrl ? `${resolvedBaseUrl}${path}` : path
+}
+
+function buildAbsoluteUrl(path: string, baseUrl?: string) {
+  const resolvedBaseUrl = resolveBaseUrl(baseUrl)
+  if (resolvedBaseUrl) {
+    return `${resolvedBaseUrl}${path}`
+  }
+
+  if (typeof window !== 'undefined') {
+    return new URL(path, window.location.origin).toString()
+  }
+
+  return path
 }
 
 function encodeBasicCredentials(username: string, password: string) {
@@ -369,5 +423,73 @@ export function addAVU(
 }
 
 export function downloadPathUrl(irodsPath: string, baseUrl?: string) {
-  return buildUrl(`/api/v1/path/contents${withPath(irodsPath)}`, baseUrl)
+  return buildAbsoluteUrl(`/api/v1/path/contents${withPath(irodsPath)}`, baseUrl)
+}
+
+export function actionLinkUrl(action: ActionLink, baseUrl?: string) {
+  return buildAbsoluteUrl(action.href, baseUrl)
+}
+
+export function getTickets(auth: RequestAuth, baseUrl?: string) {
+  return request<TicketCollectionResponse>('/api/v1/ticket', {
+    auth,
+    baseUrl,
+  })
+}
+
+export function createPathTicket(
+  action: ActionLink,
+  payload: { maximum_uses?: number; lifetime_minutes?: number },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  return request<TicketResponse>(action.href, {
+    auth,
+    baseUrl,
+    method: action.method ?? 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateTicket(
+  action: ActionLink,
+  payload: { maximum_uses?: number; lifetime_minutes?: number },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  return request<TicketResponse>(action.href, {
+    auth,
+    baseUrl,
+    method: action.method ?? 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function deleteTicket(action: ActionLink, auth: RequestAuth, baseUrl?: string) {
+  const response = await fetch(buildUrl(action.href, baseUrl), {
+    method: action.method ?? 'DELETE',
+    headers: buildHeaders(auth),
+  })
+
+  if (!response.ok) {
+    let payload: ApiErrorPayload | null = null
+
+    try {
+      payload = (await response.json()) as ApiErrorPayload
+    } catch {
+      // Fall back to the HTTP status when the response body is not JSON.
+    }
+
+    throw new ApiError(
+      response.status,
+      payload?.message ?? `Request failed with status ${response.status}`,
+      payload?.code,
+    )
+  }
 }
