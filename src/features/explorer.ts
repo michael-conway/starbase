@@ -16,29 +16,6 @@ export function displayName(path: string) {
   return path.split('/').filter(Boolean).at(-1) ?? path
 }
 
-export function formatBytes(size?: number) {
-  if (size === undefined) {
-    return 'N/A'
-  }
-
-  if (size < 1024) {
-    return `${size} B`
-  }
-
-  const units = ['KB', 'MB', 'GB', 'TB']
-  let value = size / 1024
-  let unitIndex = 0
-
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024
-    unitIndex += 1
-  }
-
-  return `${new Intl.NumberFormat('en-US', {
-    maximumFractionDigits: value >= 100 ? 0 : 1,
-  }).format(value)} ${units[unitIndex]}`
-}
-
 export function formatDateTime(value?: string) {
   if (!value) {
     return '—'

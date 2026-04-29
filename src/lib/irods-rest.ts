@@ -27,6 +27,19 @@ export interface AVULinks {
   delete?: ActionLink
 }
 
+export interface PathACLItemLinks {
+  update?: ActionLink
+  remove?: ActionLink
+}
+
+export interface PathACLLinks {
+  path?: ActionLink
+  add_permission?: ActionLink
+  add_user?: ActionLink
+  set_inheritance?: ActionLink
+  delete_inheritance?: ActionLink
+}
+
 export interface PathEntry {
   id: string
   path: string
@@ -39,6 +52,7 @@ export interface PathEntry {
   parent?: ParentLink
   links?: {
     avus?: ActionLink
+    acls?: ActionLink
     create_avu?: ActionLink
     create_ticket?: ActionLink
     resources?: ActionLink
@@ -101,6 +115,26 @@ export interface PathAVUResponse {
   total?: number
   offset?: number
   limit?: number
+}
+
+export interface PathACLEntry {
+  id: string
+  name: string
+  zone?: string
+  type: 'user' | 'group'
+  irods_user_type?: string
+  access_level: string
+  links?: PathACLItemLinks
+}
+
+export interface PathACLResponse {
+  irods_path: string
+  kind: 'data_object' | 'collection'
+  path_segments: PathSegmentLink[]
+  inheritance_enabled?: boolean
+  links?: PathACLLinks
+  users: PathACLEntry[]
+  groups: PathACLEntry[]
 }
 
 export interface PathChecksumResponse {
@@ -174,6 +208,28 @@ export interface ResourceCollectionResponse {
   links: {
     self?: ActionLink
   }
+}
+
+export interface UserLookupEntry {
+  id?: number
+  name: string
+  zone?: string
+  type?: string
+}
+
+export interface UserLookupResponse {
+  users: UserLookupEntry[]
+}
+
+export interface GroupLookupEntry {
+  id?: number
+  name: string
+  zone?: string
+  type?: string
+}
+
+export interface GroupLookupResponse {
+  groups: GroupLookupEntry[]
 }
 
 export interface PathContentsUploadResponse {
@@ -355,6 +411,48 @@ export function getResources(
   })
 
   return request<ResourceCollectionResponse>(`/api/v1/resource?${params.toString()}`, {
+    auth,
+    baseUrl,
+  })
+}
+
+export function searchUsers(
+  prefix: string,
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: { zone?: string },
+) {
+  const params = new URLSearchParams({
+    prefix,
+  })
+
+  const zone = options?.zone?.trim()
+  if (zone) {
+    params.set('zone', zone)
+  }
+
+  return request<UserLookupResponse>(`/api/v1/user?${params.toString()}`, {
+    auth,
+    baseUrl,
+  })
+}
+
+export function searchGroups(
+  prefix: string,
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: { zone?: string },
+) {
+  const params = new URLSearchParams({
+    prefix,
+  })
+
+  const zone = options?.zone?.trim()
+  if (zone) {
+    params.set('zone', zone)
+  }
+
+  return request<GroupLookupResponse>(`/api/v1/usergroup?${params.toString()}`, {
     auth,
     baseUrl,
   })
@@ -548,6 +646,13 @@ export function getPathAVUs(irodsPath: string, auth: RequestAuth, baseUrl?: stri
   })
 }
 
+export function getPathACL(irodsPath: string, auth: RequestAuth, baseUrl?: string) {
+  return request<PathACLResponse>(`/api/v1/path/acl${withPath(irodsPath)}`, {
+    auth,
+    baseUrl,
+  })
+}
+
 export function computePathChecksum(irodsPath: string, auth: RequestAuth, baseUrl?: string) {
   return request<PathChecksumResponse>(`/api/v1/path/checksum${withPath(irodsPath)}`, {
     auth,
@@ -634,6 +739,162 @@ export function addAVU(
     },
     body: JSON.stringify(payload),
   })
+}
+
+export function addPathACL(
+  action: ActionLink,
+  payload: {
+    name: string
+    type?: 'user' | 'group'
+    zone?: string
+    access_level: string
+    recursive?: boolean
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  return request<{ acl?: PathACLEntry }>(action.href, {
+    auth,
+    baseUrl,
+    method: action.method ?? 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updatePathACL(
+  action: ActionLink,
+  payload: {
+    access_level: string
+    recursive?: boolean
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  return request<{ acl?: PathACLEntry }>(action.href, {
+    auth,
+    baseUrl,
+    method: action.method ?? 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function deletePathACL(action: ActionLink, auth: RequestAuth, baseUrl?: string) {
+  const response = await fetch(buildUrl(action.href, baseUrl), {
+    method: action.method ?? 'DELETE',
+    headers: buildHeaders(auth),
+  })
+
+  if (!response.ok) {
+    let payload: ApiErrorPayload | null = null
+
+    try {
+      payload = (await response.json()) as ApiErrorPayload
+    } catch {
+      // Fall back to the HTTP status when the response body is not JSON.
+    }
+
+    throw buildApiError(response.status, payload)
+  }
+}
+
+export async function invokeActionLink(
+  action: ActionLink,
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: {
+    method?: string
+    body?: BodyInit
+    headers?: Record<string, string>
+  },
+) {
+  const response = await fetch(buildUrl(action.href, baseUrl), {
+    method: options?.method ?? action.method ?? 'POST',
+    headers: {
+      ...buildHeaders(auth),
+      ...options?.headers,
+    },
+    body: options?.body,
+  })
+
+  if (!response.ok) {
+    let payload: ApiErrorPayload | null = null
+
+    try {
+      payload = (await response.json()) as ApiErrorPayload
+    } catch {
+      // Fall back to the HTTP status when the response body is not JSON.
+    }
+
+    throw buildApiError(response.status, payload)
+  }
+}
+
+export async function setPathACLInheritance(
+  action: ActionLink,
+  payload: {
+    enabled: boolean
+    recursive?: boolean
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  const response = await fetch(buildUrl(action.href, baseUrl), {
+    method: action.method ?? 'PUT',
+    headers: {
+      ...buildHeaders(auth),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+
+  if (!response.ok) {
+    let payload: ApiErrorPayload | null = null
+
+    try {
+      payload = (await response.json()) as ApiErrorPayload
+    } catch {
+      // Fall back to the HTTP status when the response body is not JSON.
+    }
+
+    throw buildApiError(response.status, payload)
+  }
+}
+
+export async function deletePathACLInheritance(
+  action: ActionLink,
+  options: {
+    recursive?: boolean
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  const href = new URL(buildAbsoluteUrl(action.href, baseUrl))
+  if (options.recursive) {
+    href.searchParams.set('recursive', 'true')
+  }
+
+  const response = await fetch(href.toString(), {
+    method: action.method ?? 'DELETE',
+    headers: buildHeaders(auth),
+  })
+
+  if (!response.ok) {
+    let payload: ApiErrorPayload | null = null
+
+    try {
+      payload = (await response.json()) as ApiErrorPayload
+    } catch {
+      // Fall back to the HTTP status when the response body is not JSON.
+    }
+
+    throw buildApiError(response.status, payload)
+  }
 }
 
 export function downloadPathUrl(irodsPath: string, baseUrl?: string) {

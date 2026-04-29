@@ -8,12 +8,14 @@ import {
   Breadcrumbs,
   Button,
   Card,
+  Checkbox,
   Code,
   Divider,
   Group,
   Loader,
   Modal,
   Paper,
+  Select,
   Stack,
   Switch,
   Table,
@@ -38,28 +40,39 @@ import {
   IconFolder,
   IconFingerprint,
   IconKey,
+  IconLock,
   IconPlus,
   IconTrash,
   IconUpload,
 } from '@tabler/icons-react'
-import { displayName, formatBytes, formatDateTime } from '../features/explorer'
+import { displayName, formatDateTime } from '../features/explorer'
 import {
+  addPathACL,
   addAVU,
   actionLinkUrl,
   ApiError,
   computePathChecksum,
   createPathTicket,
+  deletePathACLInheritance,
+  deletePathACL,
   deleteAVU,
   deletePath,
   deleteTicket,
   downloadPath,
   getPath,
+  getPathACL,
   getPathAVUs,
+  searchGroups,
+  searchUsers,
   getTickets,
+  type PathACLEntry,
+  type PathACLResponse,
   renamePath,
+  setPathACLInheritance,
   type ActionLink,
   type PathEntry,
   type TicketEntry,
+  updatePathACL,
   updateTicket,
 } from '../lib/irods-rest'
 import { useSession } from '../providers/session'
@@ -75,6 +88,30 @@ interface RenameDialogState {
   path: string
   label: string
   kind: PathEntry['kind']
+}
+
+interface ACLFormState {
+  name: string
+  zone: string
+  type: 'user' | 'group'
+  read: boolean
+  write: boolean
+  own: boolean
+}
+
+interface ACLPermissionState {
+  read: boolean
+  write: boolean
+  own: boolean
+}
+
+type ACLPermissionKey = keyof ACLPermissionState
+
+interface ACLPrincipalOption {
+  value: string
+  label: string
+  principal: string
+  zone?: string
 }
 
 function avuCreateAction(entry?: Pick<PathEntry, 'links'>): ActionLink | undefined {
@@ -202,6 +239,145 @@ function formatTicketLimit(value?: number) {
   return value === 0 ? 'Unlimited' : `${value}`
 }
 
+function aclAddAction(entry?: Pick<PathACLResponse, 'links'>): ActionLink | undefined {
+  return entry?.links?.add_permission ?? entry?.links?.add_user
+}
+
+function normalizeACLPermissionState(state: ACLPermissionState): ACLPermissionState {
+  if (state.own) {
+    return {
+      read: true,
+      write: true,
+      own: true,
+    }
+  }
+
+  if (state.write) {
+    return {
+      read: true,
+      write: true,
+      own: false,
+    }
+  }
+
+  return {
+    read: state.read,
+    write: false,
+    own: false,
+  }
+}
+
+function nextACLPermissionState(
+  current: ACLPermissionState,
+  permission: ACLPermissionKey,
+  checked: boolean,
+): ACLPermissionState {
+  const next = {
+    ...current,
+    [permission]: checked,
+  }
+
+  if (permission === 'read' && !checked) {
+    next.write = false
+    next.own = false
+  }
+
+  if (permission === 'write' && !checked) {
+    next.own = false
+  }
+
+  return normalizeACLPermissionState(next)
+}
+
+function aclPermissionState(accessLevel?: string): ACLPermissionState {
+  const normalized = accessLevel?.trim().toLowerCase() ?? ''
+  if (normalized === 'own') {
+    return {
+      read: true,
+      write: true,
+      own: true,
+    }
+  }
+
+  if (normalized === 'modify_object' || normalized === 'write' || normalized === 'write_object') {
+    return {
+      read: true,
+      write: true,
+      own: false,
+    }
+  }
+
+  if (normalized === 'read_object' || normalized === 'read') {
+    return {
+      read: true,
+      write: false,
+      own: false,
+    }
+  }
+
+  return {
+    read: false,
+    write: false,
+    own: false,
+  }
+}
+
+function aclAccessLevelFromState(state: ACLPermissionState) {
+  if (state.own) {
+    return 'own'
+  }
+
+  if (state.write) {
+    return 'modify_object'
+  }
+
+  if (state.read) {
+    return 'read_object'
+  }
+
+  return ''
+}
+
+function aclAccessLevelLabel(accessLevel?: string) {
+  const normalized = accessLevel?.trim()
+  if (!normalized) {
+    return 'None'
+  }
+
+  switch (normalized.toLowerCase()) {
+    case 'own':
+      return 'Owner'
+    case 'modify_object':
+    case 'write':
+    case 'write_object':
+      return 'Write'
+    case 'read_object':
+    case 'read':
+      return 'Read'
+    default:
+      return normalized
+  }
+}
+
+function aclPrincipalLabel(entry: PathACLEntry) {
+  return entry.zone ? `${entry.name}#${entry.zone}` : entry.name
+}
+
+function collectionInheritanceAction(
+  acl?: Pick<PathACLResponse, 'inheritance_enabled' | 'links'>,
+) {
+  const links = acl?.links
+  if (!links) {
+    return undefined
+  }
+
+  if (acl?.inheritance_enabled === true) {
+    return links.delete_inheritance ?? links.set_inheritance
+  }
+
+  return links.set_inheritance ?? links.delete_inheritance
+}
+
 export function ExplorerDetailsPage() {
   const { connection } = useSession()
   const { openFilePicker } = useUploadManager()
@@ -214,6 +390,19 @@ export function ExplorerDetailsPage() {
     value: '',
     unit: '',
   })
+  const [isAddingACL, setIsAddingACL] = useState(false)
+  const [aclForm, setACLForm] = useState<ACLFormState>({
+    name: '',
+    zone: '',
+    type: 'user',
+    read: true,
+    write: false,
+    own: false,
+  })
+  const [aclPrincipalSelection, setACLPrincipalSelection] = useState<string | null>(null)
+  const [aclPrincipalSearchValue, setACLPrincipalSearchValue] = useState('')
+  const [aclEdits, setACLEdits] = useState<Record<string, ACLPermissionState>>({})
+  const [applyACLRecursively, setApplyACLRecursively] = useState(false)
   const [isAddingTicket, setIsAddingTicket] = useState(false)
   const [ticketForm, setTicketForm] = useState({
     maximumUses: '50',
@@ -239,6 +428,60 @@ export function ExplorerDetailsPage() {
     queryFn: () => getPathAVUs(irodsPath, connection.auth, connection.baseUrl),
     enabled: Boolean(irodsPath),
   })
+  const aclQuery = useQuery({
+    queryKey: ['path-acls', irodsPath, connection],
+    queryFn: () => getPathACL(irodsPath, connection.auth, connection.baseUrl),
+    enabled: Boolean(irodsPath),
+  })
+  const aclPrincipalSearchTerm = aclPrincipalSearchValue.trim()
+  const aclPrincipalQuery = useQuery({
+    queryKey: [
+      'acl-principal-search',
+      connection.baseUrl,
+      connection.auth.mode,
+      aclForm.type,
+      aclPrincipalSearchTerm,
+      aclForm.zone.trim(),
+    ],
+    queryFn: async (): Promise<ACLPrincipalOption[]> => {
+      const zone = aclForm.zone.trim() || detailsQuery.data?.zone || undefined
+
+      if (aclForm.type === 'group') {
+        const payload = await searchGroups(
+          aclPrincipalSearchTerm,
+          connection.auth,
+          connection.baseUrl,
+          { zone },
+        )
+
+        return payload.groups.map((group) => ({
+          value: group.zone ? `${group.name}#${group.zone}` : group.name,
+          label: group.zone ? `${group.name}#${group.zone}` : group.name,
+          principal: group.name,
+          zone: group.zone,
+        }))
+      }
+
+      const payload = await searchUsers(
+        aclPrincipalSearchTerm,
+        connection.auth,
+        connection.baseUrl,
+        { zone },
+      )
+      return payload.users.map((user) => ({
+        value: user.zone ? `${user.name}#${user.zone}` : user.name,
+        label: user.zone ? `${user.name}#${user.zone}` : user.name,
+        principal: user.name,
+        zone: user.zone,
+      }))
+    },
+    enabled: isAddingACL && aclPrincipalSearchTerm.length >= 3,
+    staleTime: 30_000,
+  })
+  const aclPrincipalOptionsByValue = useMemo(
+    () => new Map((aclPrincipalQuery.data ?? []).map((option) => [option.value, option])),
+    [aclPrincipalQuery.data],
+  )
   const ticketsQuery = useQuery({
     queryKey: ['tickets', connection],
     queryFn: () => getTickets(connection.auth, connection.baseUrl),
@@ -309,6 +552,158 @@ export function ExplorerDetailsPage() {
     onError: (error: Error) => {
       notifications.show({
         title: 'AVU add failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+  const addACLMutation = useMutation({
+    mutationFn: (input: {
+      href: ActionLink
+      name: string
+      zone?: string
+      type: 'user' | 'group'
+      access_level: string
+      recursive?: boolean
+    }) =>
+      addPathACL(
+        input.href,
+        {
+          name: input.name,
+          zone: input.zone,
+          type: input.type,
+          access_level: input.access_level,
+          recursive: input.recursive,
+        },
+        connection.auth,
+        connection.baseUrl,
+      ),
+    onSuccess: async () => {
+      notifications.show({
+        title: 'Permission added',
+        message: 'ACL entry created.',
+        color: 'teal',
+      })
+      await aclQuery.refetch()
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'Permission add failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+  const updateACLMutation = useMutation({
+    mutationFn: (input: {
+      href: ActionLink
+      access_level: string
+      recursive?: boolean
+    }) =>
+      updatePathACL(
+        input.href,
+        {
+          access_level: input.access_level,
+          recursive: input.recursive,
+        },
+        connection.auth,
+        connection.baseUrl,
+      ),
+    onSuccess: async () => {
+      notifications.show({
+        title: 'Permission updated',
+        message: 'ACL entry saved.',
+        color: 'teal',
+      })
+      await aclQuery.refetch()
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'Permission update failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+  const deleteACLMutation = useMutation({
+    mutationFn: (input: { href: ActionLink }) =>
+      deletePathACL(input.href, connection.auth, connection.baseUrl),
+    onSuccess: async () => {
+      notifications.show({
+        title: 'Permission deleted',
+        message: 'ACL entry removed.',
+        color: 'teal',
+      })
+      await aclQuery.refetch()
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'Permission delete failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+  const inheritanceMutation = useMutation({
+    mutationFn: (input: {
+      enabled: boolean
+      setAction?: ActionLink
+      deleteAction?: ActionLink
+      recursive?: boolean
+    }) => {
+      if (input.enabled) {
+        const action = input.setAction ?? input.deleteAction
+        if (!action) {
+          throw new Error('No inheritance enable action available')
+        }
+
+        return setPathACLInheritance(
+          action,
+          {
+            enabled: true,
+            recursive: input.recursive,
+          },
+          connection.auth,
+          connection.baseUrl,
+        )
+      }
+
+      if (input.deleteAction) {
+        return deletePathACLInheritance(
+          input.deleteAction,
+          {
+            recursive: input.recursive,
+          },
+          connection.auth,
+          connection.baseUrl,
+        )
+      }
+
+      if (input.setAction) {
+        return setPathACLInheritance(
+          input.setAction,
+          {
+            enabled: false,
+            recursive: input.recursive,
+          },
+          connection.auth,
+          connection.baseUrl,
+        )
+      }
+
+      throw new Error('No inheritance disable action available')
+    },
+    onSuccess: async () => {
+      notifications.show({
+        title: 'Inheritance updated',
+        message: 'Collection inheritance setting changed.',
+        color: 'teal',
+      })
+      await aclQuery.refetch()
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'Inheritance update failed',
         message: error.message,
         color: 'red',
       })
@@ -497,6 +892,10 @@ export function ExplorerDetailsPage() {
       ),
     [ticketsQuery.data, irodsPath],
   )
+  const aclEntries = useMemo(
+    () => [...(aclQuery.data?.users ?? []), ...(aclQuery.data?.groups ?? [])],
+    [aclQuery.data],
+  )
   const isCollection = detailsQuery.data?.kind === 'collection'
   const isDataObject = detailsQuery.data?.kind === 'data_object'
   const backPath = useMemo(() => {
@@ -611,6 +1010,172 @@ export function ExplorerDetailsPage() {
         },
       },
     )
+  }
+
+  const beginACLAdd = () => {
+    if (!aclAddAction(aclQuery.data)) {
+      return
+    }
+
+    setIsAddingACL(true)
+    setACLPrincipalSelection(null)
+    setACLPrincipalSearchValue('')
+    setACLForm({
+      name: '',
+      zone: detailsQuery.data?.zone ?? '',
+      type: 'user',
+      read: true,
+      write: false,
+      own: false,
+    })
+  }
+
+  const cancelACLAdd = () => {
+    setIsAddingACL(false)
+    setACLPrincipalSelection(null)
+    setACLPrincipalSearchValue('')
+    setACLForm({
+      name: '',
+      zone: '',
+      type: 'user',
+      read: true,
+      write: false,
+      own: false,
+    })
+  }
+
+  const aclDraftForEntry = (entry: PathACLEntry) =>
+    aclEdits[entry.id] ?? aclPermissionState(entry.access_level)
+
+  const updateACLDraft = (entry: PathACLEntry, next: ACLPermissionState) => {
+    setACLEdits((current) => ({
+      ...current,
+      [entry.id]: next,
+    }))
+  }
+
+  const submitACLAdd = () => {
+    const action = aclAddAction(aclQuery.data)
+    if (!action) {
+      return
+    }
+
+    if (!aclForm.name.trim()) {
+      notifications.show({
+        title: 'Permission is incomplete',
+        message: 'Principal name is required.',
+        color: 'red',
+      })
+      return
+    }
+
+    const accessLevel = aclAccessLevelFromState(
+      {
+        read: aclForm.read,
+        write: aclForm.write,
+        own: aclForm.own,
+      },
+    )
+
+    if (!accessLevel) {
+      notifications.show({
+        title: 'Permission is incomplete',
+        message: 'Select read or write access before adding a permission.',
+        color: 'red',
+      })
+      return
+    }
+
+    addACLMutation.mutate(
+      {
+        href: action,
+        name: aclForm.name.trim(),
+        zone: aclForm.zone.trim() || undefined,
+        type: aclForm.type,
+        access_level: accessLevel,
+        recursive: isCollection && applyACLRecursively ? true : undefined,
+      },
+      {
+        onSuccess: async () => {
+          cancelACLAdd()
+          await aclQuery.refetch()
+        },
+      },
+    )
+  }
+
+  const submitACLUpdate = (entry: PathACLEntry) => {
+    if (!entry.links?.update) {
+      return
+    }
+
+    const draft = aclDraftForEntry(entry)
+    const accessLevel = aclAccessLevelFromState(draft)
+    if (!accessLevel) {
+      notifications.show({
+        title: 'Permission is incomplete',
+        message: 'Select read or write access before updating a permission.',
+        color: 'red',
+      })
+      return
+    }
+
+    updateACLMutation.mutate(
+      {
+        href: entry.links.update,
+        access_level: accessLevel,
+        recursive: isCollection && applyACLRecursively ? true : undefined,
+      },
+      {
+        onSuccess: async () => {
+          setACLEdits((current) => {
+            const next = { ...current }
+            delete next[entry.id]
+            return next
+          })
+          await aclQuery.refetch()
+        },
+      },
+    )
+  }
+
+  const beginACLDelete = (entry: PathACLEntry) => {
+    if (!entry.links?.remove) {
+      return
+    }
+
+    const confirmed = window.confirm(`Delete permission for "${entry.name}"?`)
+    if (!confirmed) {
+      return
+    }
+
+    deleteACLMutation.mutate({
+      href: entry.links.remove,
+    })
+  }
+
+  const toggleCollectionInheritance = (enabled: boolean) => {
+    const setAction = aclQuery.data?.links?.set_inheritance
+    const deleteAction = aclQuery.data?.links?.delete_inheritance
+
+    const canEnable = Boolean(setAction ?? deleteAction)
+    const canDisable = Boolean(deleteAction ?? setAction)
+
+    if ((enabled && !canEnable) || (!enabled && !canDisable)) {
+      notifications.show({
+        title: 'Inheritance unavailable',
+        message: 'The current API response does not expose inheritance controls yet.',
+        color: 'yellow',
+      })
+      return
+    }
+
+    inheritanceMutation.mutate({
+      enabled,
+      setAction,
+      deleteAction,
+      recursive: applyACLRecursively,
+    })
   }
 
   const beginTicketAdd = () => {
@@ -977,7 +1542,7 @@ export function ExplorerDetailsPage() {
                       />
                       <SummaryStat
                         label="Size"
-                        value={detailsQuery.data.display_size ?? formatBytes(detailsQuery.data.size)}
+                        value={detailsQuery.data.display_size ?? '—'}
                       />
                       <SummaryStat
                         label="Updated"
@@ -1084,6 +1649,7 @@ export function ExplorerDetailsPage() {
                     <Tabs.Tab value="overview">Overview</Tabs.Tab>
                     {isDataObject ? <Tabs.Tab value="storage">Storage</Tabs.Tab> : null}
                     <Tabs.Tab value="avus">AVUs</Tabs.Tab>
+                    <Tabs.Tab value="permissions">Permissions</Tabs.Tab>
                     <Tabs.Tab value="tickets">Tickets</Tabs.Tab>
                   </Tabs.List>
 
@@ -1408,6 +1974,326 @@ export function ExplorerDetailsPage() {
                     </Card>
                   </Tabs.Panel>
 
+                  <Tabs.Panel value="permissions" pt="md">
+                    <Card shadow="sm" radius="xl" padding="lg">
+                      <Stack gap="sm">
+                        <Group gap="xs" justify="space-between">
+                          <Group gap="xs">
+                            <ThemeIcon variant="light" color="red" size="md">
+                              <IconLock size={14} />
+                            </ThemeIcon>
+                            <Title order={4}>Permissions</Title>
+                          </Group>
+                          {aclAddAction(aclQuery.data) ? (
+                            <Button
+                              size="xs"
+                              variant="light"
+                              leftSection={<IconPlus size={14} />}
+                              loading={addACLMutation.isPending}
+                              onClick={beginACLAdd}
+                              disabled={isAddingACL}
+                            >
+                              Add permission
+                            </Button>
+                          ) : null}
+                        </Group>
+
+                        {isCollection ? (
+                          <Paper withBorder radius="md" p="sm">
+                            <Stack gap="xs">
+                              <Group gap="md" justify="space-between" align="center">
+                                <Checkbox
+                                  label="Inherit permissions to child paths"
+                                  checked={aclQuery.data?.inheritance_enabled === true}
+                                  disabled={
+                                    aclQuery.isLoading ||
+                                    inheritanceMutation.isPending ||
+                                    !collectionInheritanceAction(aclQuery.data)
+                                  }
+                                  onChange={(event) =>
+                                    toggleCollectionInheritance(event.currentTarget.checked)
+                                  }
+                                />
+                                <Checkbox
+                                  label="Apply permission changes recursively"
+                                  checked={applyACLRecursively}
+                                  onChange={(event) =>
+                                    setApplyACLRecursively(event.currentTarget.checked)
+                                  }
+                                />
+                              </Group>
+                              {!collectionInheritanceAction(aclQuery.data) ? (
+                                <Text size="xs" c="dimmed">
+                                  Inheritance controls are unavailable from the current ACL response.
+                                </Text>
+                              ) : null}
+                            </Stack>
+                          </Paper>
+                        ) : null}
+
+                        {aclQuery.isError ? (
+                          <Alert
+                            color="red"
+                            variant="light"
+                            icon={<IconAlertCircle size={18} />}
+                            title="Unable to load permissions"
+                          >
+                            {aclQuery.error.message}
+                          </Alert>
+                        ) : (
+                          <Table highlightOnHover verticalSpacing="sm">
+                            <Table.Thead>
+                              <Table.Tr>
+                                <Table.Th>Principal</Table.Th>
+                                <Table.Th>Type</Table.Th>
+                                <Table.Th>Zone</Table.Th>
+                                <Table.Th>Current</Table.Th>
+                                <Table.Th>Permissions</Table.Th>
+                                <Table.Th>Actions</Table.Th>
+                              </Table.Tr>
+                            </Table.Thead>
+                            <Table.Tbody>
+                              {aclQuery.isLoading ? (
+                                <Table.Tr>
+                                  <Table.Td colSpan={6}>
+                                    <Text size="sm" c="dimmed">
+                                      Loading permissions...
+                                    </Text>
+                                  </Table.Td>
+                                </Table.Tr>
+                              ) : isAddingACL ? (
+                                <Table.Tr className="explorer-row-selected">
+                                  <Table.Td>
+                                    <Select
+                                      searchable
+                                      value={aclPrincipalSelection}
+                                      searchValue={aclPrincipalSearchValue}
+                                      placeholder={`Search ${aclForm.type} (3+ chars)`}
+                                      data={aclPrincipalQuery.data ?? []}
+                                      nothingFoundMessage={
+                                        aclPrincipalSearchTerm.length < 3
+                                          ? 'Type at least 3 characters'
+                                          : aclPrincipalQuery.isLoading
+                                            ? 'Searching...'
+                                            : 'No matches found'
+                                      }
+                                      onSearchChange={(value) => {
+                                        setACLPrincipalSearchValue(value)
+                                        const selected = aclPrincipalSelection
+                                          ? aclPrincipalOptionsByValue.get(aclPrincipalSelection)
+                                          : null
+                                        if (!selected || selected.label !== value) {
+                                          setACLPrincipalSelection(null)
+                                          setACLForm((current) => ({
+                                            ...current,
+                                            name: '',
+                                          }))
+                                        }
+                                      }}
+                                      onChange={(value) => {
+                                        setACLPrincipalSelection(value)
+                                        if (!value) {
+                                          setACLPrincipalSearchValue('')
+                                          setACLForm((current) => ({
+                                            ...current,
+                                            name: '',
+                                          }))
+                                          return
+                                        }
+
+                                        const selected = aclPrincipalOptionsByValue.get(value)
+                                        if (!selected) {
+                                          setACLForm((current) => ({
+                                            ...current,
+                                            name: '',
+                                          }))
+                                          return
+                                        }
+
+                                        setACLForm((current) => ({
+                                          ...current,
+                                          name: selected.principal,
+                                          zone: selected.zone ?? current.zone,
+                                        }))
+                                        setACLPrincipalSearchValue(selected.label)
+                                      }}
+                                      rightSection={
+                                        aclPrincipalQuery.isFetching ? <Loader size={14} /> : undefined
+                                      }
+                                      disabled={addACLMutation.isPending}
+                                    />
+                                  </Table.Td>
+                                  <Table.Td>
+                                    <Select
+                                      data={[
+                                        { value: 'user', label: 'User' },
+                                        { value: 'group', label: 'Group' },
+                                      ]}
+                                      value={aclForm.type}
+                                      allowDeselect={false}
+                                      onChange={(value) => {
+                                        if (value === 'user' || value === 'group') {
+                                          setACLPrincipalSelection(null)
+                                          setACLPrincipalSearchValue('')
+                                          setACLForm((current) => ({
+                                            ...current,
+                                            type: value,
+                                            name: '',
+                                          }))
+                                        }
+                                      }}
+                                    />
+                                  </Table.Td>
+                                  <Table.Td>
+                                    <TextInput
+                                      placeholder={detailsQuery.data.zone}
+                                      value={aclForm.zone}
+                                      onChange={(event) => {
+                                        const value = event.currentTarget.value
+                                        setACLForm((current) => ({
+                                          ...current,
+                                          zone: value,
+                                        }))
+                                      }}
+                                    />
+                                  </Table.Td>
+                                  <Table.Td>
+                                    <Text size="sm" c="dimmed">
+                                      New
+                                    </Text>
+                                  </Table.Td>
+                                  <Table.Td>
+                                    <ACLPermissionCheckboxes
+                                      value={{
+                                        read: aclForm.read,
+                                        write: aclForm.write,
+                                        own: aclForm.own,
+                                      }}
+                                      principalLabel={aclForm.name || 'new principal'}
+                                      disabled={addACLMutation.isPending}
+                                      onChange={(permission, checked) =>
+                                        setACLForm((current) => ({
+                                          ...current,
+                                          ...nextACLPermissionState(
+                                            {
+                                              read: current.read,
+                                              write: current.write,
+                                              own: current.own,
+                                            },
+                                            permission,
+                                            checked,
+                                          ),
+                                        }))
+                                      }
+                                    />
+                                  </Table.Td>
+                                  <Table.Td>
+                                    <Group gap="xs" wrap="nowrap">
+                                      <Button
+                                        size="xs"
+                                        onClick={submitACLAdd}
+                                        loading={addACLMutation.isPending}
+                                      >
+                                        Add
+                                      </Button>
+                                      <Button size="xs" variant="default" onClick={cancelACLAdd}>
+                                        Cancel
+                                      </Button>
+                                    </Group>
+                                  </Table.Td>
+                                </Table.Tr>
+                              ) : aclEntries.length === 0 ? (
+                                <Table.Tr>
+                                  <Table.Td colSpan={6}>
+                                    <Text size="sm" c="dimmed">
+                                      No permissions returned for this path.
+                                    </Text>
+                                  </Table.Td>
+                                </Table.Tr>
+                              ) : (
+                                aclEntries.map((entry) => {
+                                  const draft = aclDraftForEntry(entry)
+                                  const principalLabel = aclPrincipalLabel(entry)
+
+                                  return (
+                                    <Table.Tr key={entry.id}>
+                                      <Table.Td>
+                                        <Stack gap={2}>
+                                          <Text size="sm" fw={600}>
+                                            {entry.name}
+                                          </Text>
+                                          <Text size="xs" c="dimmed">
+                                            {entry.id}
+                                          </Text>
+                                        </Stack>
+                                      </Table.Td>
+                                      <Table.Td>
+                                        <Badge variant="light" color={entry.type === 'group' ? 'grape' : 'blue'}>
+                                          {entry.type}
+                                        </Badge>
+                                      </Table.Td>
+                                      <Table.Td>{entry.zone ?? '—'}</Table.Td>
+                                      <Table.Td>
+                                        <Stack gap={2}>
+                                          <Text size="sm">{aclAccessLevelLabel(entry.access_level)}</Text>
+                                          <Text size="xs" c="dimmed">
+                                            {entry.access_level}
+                                          </Text>
+                                        </Stack>
+                                      </Table.Td>
+                                      <Table.Td>
+                                        <ACLPermissionCheckboxes
+                                          value={draft}
+                                          principalLabel={principalLabel}
+                                          disabled={!entry.links?.update || updateACLMutation.isPending}
+                                          onChange={(permission, checked) =>
+                                            updateACLDraft(
+                                              entry,
+                                              nextACLPermissionState(draft, permission, checked),
+                                            )
+                                          }
+                                        />
+                                      </Table.Td>
+                                      <Table.Td>
+                                        <Group gap="xs" wrap="nowrap">
+                                          {entry.links?.update ? (
+                                            <Button
+                                              size="xs"
+                                              variant="light"
+                                              onClick={() => submitACLUpdate(entry)}
+                                              loading={updateACLMutation.isPending}
+                                            >
+                                              Update
+                                            </Button>
+                                          ) : null}
+                                          {entry.links?.remove ? (
+                                            <ActionIcon
+                                              variant="subtle"
+                                              color="red"
+                                              aria-label={`Delete permission for ${principalLabel}`}
+                                              onClick={() => beginACLDelete(entry)}
+                                            >
+                                              <IconTrash size={16} />
+                                            </ActionIcon>
+                                          ) : null}
+                                          {!entry.links?.update && !entry.links?.remove ? (
+                                            <Text size="sm" c="dimmed">
+                                              Unavailable
+                                            </Text>
+                                          ) : null}
+                                        </Group>
+                                      </Table.Td>
+                                    </Table.Tr>
+                                  )
+                                })
+                              )}
+                            </Table.Tbody>
+                          </Table>
+                        )}
+                      </Stack>
+                    </Card>
+                  </Tabs.Panel>
+
                   <Tabs.Panel value="tickets" pt="md">
                     <Card shadow="sm" radius="xl" padding="lg">
                       <Stack gap="sm">
@@ -1477,24 +2363,26 @@ export function ExplorerDetailsPage() {
                                     <TextInput
                                       placeholder="50"
                                       value={ticketForm.maximumUses}
-                                      onChange={(event) =>
+                                      onChange={(event) => {
+                                        const value = event.currentTarget.value
                                         setTicketForm((current) => ({
                                           ...current,
-                                          maximumUses: event.currentTarget.value,
+                                          maximumUses: value,
                                         }))
-                                      }
+                                      }}
                                     />
                                   </Table.Td>
                                   <Table.Td>
                                     <TextInput
                                       placeholder="720"
                                       value={ticketForm.lifetimeMinutes}
-                                      onChange={(event) =>
+                                      onChange={(event) => {
+                                        const value = event.currentTarget.value
                                         setTicketForm((current) => ({
                                           ...current,
-                                          lifetimeMinutes: event.currentTarget.value,
+                                          lifetimeMinutes: value,
                                         }))
-                                      }
+                                      }}
                                     />
                                   </Table.Td>
                                   <Table.Td>
@@ -1547,12 +2435,13 @@ export function ExplorerDetailsPage() {
                                       {editingTicketName === ticket.name ? (
                                         <TextInput
                                           value={ticketEditForm.maximumUses}
-                                          onChange={(event) =>
+                                          onChange={(event) => {
+                                            const value = event.currentTarget.value
                                             setTicketEditForm((current) => ({
                                               ...current,
-                                              maximumUses: event.currentTarget.value,
+                                              maximumUses: value,
                                             }))
-                                          }
+                                          }}
                                         />
                                       ) : (
                                         formatTicketLimit(ticket.uses_limit)
@@ -1562,12 +2451,13 @@ export function ExplorerDetailsPage() {
                                       {editingTicketName === ticket.name ? (
                                         <TextInput
                                           value={ticketEditForm.lifetimeMinutes}
-                                          onChange={(event) =>
+                                          onChange={(event) => {
+                                            const value = event.currentTarget.value
                                             setTicketEditForm((current) => ({
                                               ...current,
-                                              lifetimeMinutes: event.currentTarget.value,
+                                              lifetimeMinutes: value,
                                             }))
-                                          }
+                                          }}
                                         />
                                       ) : (
                                         formatDateTime(ticket.expiration_time)
@@ -1685,6 +2575,47 @@ function DetailsDownloadButton({ path }: { path: string }) {
     >
       Download object
     </Button>
+  )
+}
+
+function ACLPermissionCheckboxes({
+  value,
+  disabled,
+  principalLabel,
+  onChange,
+}: {
+  value: ACLPermissionState
+  disabled?: boolean
+  principalLabel: string
+  onChange: (permission: ACLPermissionKey, checked: boolean) => void
+}) {
+  return (
+    <Group gap="sm" wrap="nowrap">
+      <Checkbox
+        size="xs"
+        label="Read"
+        aria-label={`Read permission for ${principalLabel}`}
+        checked={value.read}
+        disabled={disabled}
+        onChange={(event) => onChange('read', event.currentTarget.checked)}
+      />
+      <Checkbox
+        size="xs"
+        label="Write"
+        aria-label={`Write permission for ${principalLabel}`}
+        checked={value.write}
+        disabled={disabled}
+        onChange={(event) => onChange('write', event.currentTarget.checked)}
+      />
+      <Checkbox
+        size="xs"
+        label="Own"
+        aria-label={`Owner permission for ${principalLabel}`}
+        checked={value.own}
+        disabled={disabled}
+        onChange={(event) => onChange('own', event.currentTarget.checked)}
+      />
+    </Group>
   )
 }
 

@@ -64,7 +64,7 @@ function zoneFromSearch(search: string) {
 function App() {
   const { basicUsername, clearSession, connection, oidcToken } = useSession()
   const location = useLocation()
-  const [menuOpened, setMenuOpened] = useState(true)
+  const [menuOpened, setMenuOpened] = useState(false)
   const healthQuery = useQuery({
     queryKey: ['health', connection.baseUrl],
     queryFn: () => getHealth(connection.baseUrl),
