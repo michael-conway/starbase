@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ActionIcon,
@@ -42,9 +42,12 @@ import {
   IconKey,
   IconLock,
   IconPlus,
+  IconEye,
   IconTrash,
   IconUpload,
 } from '@tabler/icons-react'
+import { FilePreviewGlyph } from '../features/file-preview-icon'
+import { filePreviewSpec } from '../features/file-preview'
 import { displayName, formatDateTime } from '../features/explorer'
 import {
   addPathACL,
@@ -401,6 +404,7 @@ export function ExplorerDetailsPage() {
   })
   const [aclPrincipalSelection, setACLPrincipalSelection] = useState<string | null>(null)
   const [aclPrincipalSearchValue, setACLPrincipalSearchValue] = useState('')
+  const [headerImagePreviewUrl, setHeaderImagePreviewUrl] = useState<string | null>(null)
   const [aclEdits, setACLEdits] = useState<Record<string, ACLPermissionState>>({})
   const [applyACLRecursively, setApplyACLRecursively] = useState(false)
   const [isAddingTicket, setIsAddingTicket] = useState(false)
@@ -422,6 +426,19 @@ export function ExplorerDetailsPage() {
     queryKey: ['path-detail', irodsPath, connection],
     queryFn: () => getPath(irodsPath, connection.auth, connection.baseUrl, { verbose: 2 }),
     enabled: Boolean(irodsPath),
+  })
+  const headerPreviewSpec = useMemo(() => {
+    if (!detailsQuery.data || detailsQuery.data.kind !== 'data_object') {
+      return undefined
+    }
+
+    return filePreviewSpec(detailsQuery.data.path, detailsQuery.data.mime_type)
+  }, [detailsQuery.data])
+  const headerImagePreviewQuery = useQuery({
+    queryKey: ['path-preview-thumbnail', irodsPath, connection],
+    queryFn: () => downloadPath(irodsPath, connection.auth, connection.baseUrl),
+    enabled: Boolean(headerPreviewSpec?.kind === 'image' && detailsQuery.data?.kind === 'data_object'),
+    staleTime: 60_000,
   })
   const avuQuery = useQuery({
     queryKey: ['path-avus', irodsPath, connection],
@@ -487,6 +504,32 @@ export function ExplorerDetailsPage() {
     queryFn: () => getTickets(connection.auth, connection.baseUrl),
     enabled: Boolean(irodsPath),
   })
+  useEffect(() => {
+    if (headerPreviewSpec?.kind !== 'image' || !headerImagePreviewQuery.data?.blob) {
+      return undefined
+    }
+
+    const objectUrl = URL.createObjectURL(headerImagePreviewQuery.data.blob)
+    setHeaderImagePreviewUrl((current) => {
+      if (current) {
+        URL.revokeObjectURL(current)
+      }
+      return objectUrl
+    })
+
+    return () => {
+      URL.revokeObjectURL(objectUrl)
+    }
+  }, [headerImagePreviewQuery.data?.blob, headerPreviewSpec?.kind])
+
+  useEffect(() => {
+    setHeaderImagePreviewUrl((current) => {
+      if (current) {
+        URL.revokeObjectURL(current)
+      }
+      return null
+    })
+  }, [irodsPath])
   const checksumMutation = useMutation({
     mutationFn: () => computePathChecksum(irodsPath, connection.auth, connection.baseUrl),
     onSuccess: async (payload) => {
@@ -1524,50 +1567,100 @@ export function ExplorerDetailsPage() {
                       </Group>
                     </Group>
 
-                    <div className="details-header-summary">
-                      <SummaryStat
-                        label="Path"
-                        value={detailsQuery.data.path}
-                        code
-                        action={
-                          <ActionIcon
-                            variant="subtle"
-                            color="gray"
-                            aria-label="Copy path"
-                            onClick={() => void copyText(detailsQuery.data.path, 'Path')}
-                          >
-                            <IconCopy size={16} />
-                          </ActionIcon>
-                        }
-                      />
-                      <SummaryStat
-                        label="Size"
-                        value={detailsQuery.data.display_size ?? '—'}
-                      />
-                      <SummaryStat
-                        label="Updated"
-                        value={formatDateTime(detailsQuery.data.updated_at)}
-                      />
-                      <SummaryStat
-                        label="Resource"
-                        value={detailsQuery.data.resource ?? 'N/A'}
-                      />
-                      {detailsQuery.data.kind === 'data_object' ? (
+                    <div className="details-header-summary-with-preview">
+                      <div className="details-header-summary">
                         <SummaryStat
-                          label="MIME type"
-                          value={detailsQuery.data.mime_type ?? 'N/A'}
-                        />
-                      ) : null}
-                      {detailsQuery.data.kind === 'data_object' ? null : (
-                        <SummaryStat
-                          label="Children"
-                          value={
-                            detailsQuery.data.childCount === undefined
-                              ? 'N/A'
-                              : `${detailsQuery.data.childCount}`
+                          label="Path"
+                          value={detailsQuery.data.path}
+                          code
+                          action={
+                            <ActionIcon
+                              variant="subtle"
+                              color="gray"
+                              aria-label="Copy path"
+                              onClick={() => void copyText(detailsQuery.data.path, 'Path')}
+                            >
+                              <IconCopy size={16} />
+                            </ActionIcon>
                           }
                         />
-                      )}
+                        <SummaryStat
+                          label="Size"
+                          value={detailsQuery.data.display_size ?? '—'}
+                        />
+                        <SummaryStat
+                          label="Updated"
+                          value={formatDateTime(detailsQuery.data.updated_at)}
+                        />
+                        <SummaryStat
+                          label="Resource"
+                          value={detailsQuery.data.resource ?? 'N/A'}
+                        />
+                        {detailsQuery.data.kind === 'data_object' ? (
+                          <SummaryStat
+                            label="MIME type"
+                            value={detailsQuery.data.mime_type ?? 'N/A'}
+                          />
+                        ) : null}
+                        {detailsQuery.data.kind === 'data_object' ? null : (
+                          <SummaryStat
+                            label="Children"
+                            value={
+                              detailsQuery.data.childCount === undefined
+                                ? 'N/A'
+                                : `${detailsQuery.data.childCount}`
+                            }
+                          />
+                        )}
+                      </div>
+
+                      {detailsQuery.data.kind === 'data_object' && headerPreviewSpec ? (
+                        <button
+                          type="button"
+                          className="details-preview-tile"
+                          disabled={!headerPreviewSpec.canOpenPreview}
+                          onClick={() =>
+                            navigate(
+                              `/app/explorer/preview?irods_path=${encodeURIComponent(detailsQuery.data.path)}`,
+                            )
+                          }
+                        >
+                          <div className="details-preview-media">
+                            {headerPreviewSpec.kind === 'image' ? (
+                              headerImagePreviewUrl ? (
+                                <img
+                                  src={headerImagePreviewUrl}
+                                  alt={`Preview for ${displayName(detailsQuery.data.path)}`}
+                                />
+                              ) : headerImagePreviewQuery.isLoading ? (
+                                <Loader size={24} />
+                              ) : (
+                                <ThemeIcon size={48} radius="xl" color="blue" variant="light">
+                                  <FilePreviewGlyph icon={headerPreviewSpec.icon} size={24} />
+                                </ThemeIcon>
+                              )
+                            ) : (
+                              <ThemeIcon size={48} radius="xl" color="blue" variant="light">
+                                <FilePreviewGlyph icon={headerPreviewSpec.icon} size={24} />
+                              </ThemeIcon>
+                            )}
+                          </div>
+                          <Stack gap={4} align="center">
+                            <Text fw={600} size="sm">
+                              {headerPreviewSpec.label}
+                            </Text>
+                            <Text size="xs" c="dimmed">
+                              {headerPreviewSpec.canOpenPreview ? 'Open preview' : 'Preview unavailable'}
+                            </Text>
+                            {headerPreviewSpec.canOpenPreview ? (
+                              <Group gap={4} align="center">
+                                <IconEye size={14} />
+                                <Text size="xs">Preview</Text>
+                              </Group>
+                            ) : null}
+                          </Stack>
+                        </button>
+                      ) : null}
                     </div>
                   </Stack>
                 </Paper>

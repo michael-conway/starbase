@@ -4,6 +4,7 @@ import { Navigate, Outlet, createBrowserRouter } from 'react-router-dom'
 import App from './App'
 import { primarySections } from './app-sections'
 import { ExplorerDetailsPage } from './pages/ExplorerDetailsPage'
+import { ExplorerPreviewPage } from './pages/ExplorerPreviewPage'
 import { LoginPage } from './pages/LoginPage'
 import { ResourceDetailsPage } from './pages/ResourceDetailsPage'
 import { SetupPage } from './pages/SetupPage'
@@ -81,6 +82,10 @@ export const router = createBrowserRouter([
           {
             path: 'explorer/details',
             element: <ExplorerDetailsPage />,
+          },
+          {
+            path: 'explorer/preview',
+            element: <ExplorerPreviewPage />,
           },
           {
             path: 'resources/details',
