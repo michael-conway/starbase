@@ -6,6 +6,8 @@ export interface HealthResponse {
   description?: string
 }
 
+export type ServiceInfoResponse = Record<string, unknown>
+
 export interface ParentLink {
   irods_path: string
   href: string
@@ -40,11 +42,18 @@ export interface PathACLLinks {
   delete_inheritance?: ActionLink
 }
 
+export interface PathCommandCue {
+  operation?: string
+  gocmd?: string
+  icommand?: string
+}
+
 export interface PathEntry {
   id: string
   path: string
   kind: 'data_object' | 'collection'
   zone: string
+  cmd_cue?: PathCommandCue
   mime_type?: string
   display_size?: string
   created_at?: string
@@ -399,6 +408,13 @@ function withPath(path: string, options?: { verbose?: number }) {
 
 export function getHealth(baseUrl?: string) {
   return request<HealthResponse>('/healthz', { baseUrl })
+}
+
+export function getServiceInfo(auth: RequestAuth, baseUrl?: string) {
+  return request<ServiceInfoResponse>('/api/v1/server', {
+    auth,
+    baseUrl,
+  })
 }
 
 export function getResources(

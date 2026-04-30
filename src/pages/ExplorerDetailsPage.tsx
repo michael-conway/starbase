@@ -43,6 +43,7 @@ import {
   IconLock,
   IconPlus,
   IconEye,
+  IconTerminal2,
   IconTrash,
   IconUpload,
 } from '@tabler/icons-react'
@@ -421,6 +422,7 @@ export function ExplorerDetailsPage() {
   const [deleteForce, setDeleteForce] = useState(false)
   const [renameDialog, setRenameDialog] = useState<RenameDialogState | null>(null)
   const [renameName, setRenameName] = useState('')
+  const [commandHintsOpened, setCommandHintsOpened] = useState(false)
 
   const detailsQuery = useQuery({
     queryKey: ['path-detail', irodsPath, connection],
@@ -939,6 +941,8 @@ export function ExplorerDetailsPage() {
     () => [...(aclQuery.data?.users ?? []), ...(aclQuery.data?.groups ?? [])],
     [aclQuery.data],
   )
+  const commandCue = detailsQuery.data?.cmd_cue
+  const hasCommandHints = Boolean(commandCue?.gocmd?.trim() || commandCue?.icommand?.trim())
   const isCollection = detailsQuery.data?.kind === 'collection'
   const isDataObject = detailsQuery.data?.kind === 'data_object'
   const backPath = useMemo(() => {
@@ -1468,6 +1472,76 @@ export function ExplorerDetailsPage() {
         </Stack>
       </Modal>
 
+      <Modal
+        opened={commandHintsOpened}
+        onClose={() => setCommandHintsOpened(false)}
+        title="Command hints"
+        centered
+        size="lg"
+      >
+        <Stack gap="md">
+          <Text size="sm" c="dimmed">
+            Documentation-only command examples for this {detailsQuery.data?.kind === 'collection' ? 'collection' : 'file'}.
+          </Text>
+
+          {commandCue?.operation ? (
+            <Group gap="xs">
+              <Badge variant="light" color="blue">
+                {commandCue.operation}
+              </Badge>
+            </Group>
+          ) : null}
+
+          {commandCue?.icommand?.trim() ? (
+            <Stack gap="xs">
+              <Group justify="space-between" align="center">
+                <Text size="sm" fw={600}>
+                  iCommand
+                </Text>
+                <Button
+                  size="xs"
+                  variant="subtle"
+                  leftSection={<IconCopy size={14} />}
+                  onClick={() => void copyText(commandCue.icommand!, 'iCommand')}
+                >
+                  Copy
+                </Button>
+              </Group>
+              <Code block className="details-code-cell">
+                {commandCue.icommand}
+              </Code>
+            </Stack>
+          ) : null}
+
+          {commandCue?.gocmd?.trim() ? (
+            <Stack gap="xs">
+              <Group justify="space-between" align="center">
+                <Text size="sm" fw={600}>
+                  goCmd
+                </Text>
+                <Button
+                  size="xs"
+                  variant="subtle"
+                  leftSection={<IconCopy size={14} />}
+                  onClick={() => void copyText(commandCue.gocmd!, 'goCmd')}
+                >
+                  Copy
+                </Button>
+              </Group>
+              <Code block className="details-code-cell">
+                {commandCue.gocmd}
+              </Code>
+            </Stack>
+          ) : null}
+
+          {!commandCue?.icommand?.trim() && !commandCue?.gocmd?.trim() ? (
+            <Text size="sm" c="dimmed">
+              No command hints are available for this path.
+            </Text>
+          ) : null}
+        </Stack>
+      </Modal>
+
       <Card shadow="sm" radius="xl" padding="lg">
         <Stack gap="md">
           <Group justify="space-between" align="center">
@@ -1562,6 +1636,15 @@ export function ExplorerDetailsPage() {
                             <Badge variant="dot" color="gray">
                               {detailsQuery.data.zone}
                             </Badge>
+                            <Button
+                              size="xs"
+                              variant="default"
+                              leftSection={<IconTerminal2 size={14} />}
+                              onClick={() => setCommandHintsOpened(true)}
+                              disabled={!hasCommandHints}
+                            >
+                              Command hints
+                            </Button>
                           </Group>
                         </Group>
                       </Group>
