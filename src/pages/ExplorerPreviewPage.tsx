@@ -19,7 +19,7 @@ import {
   Title,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { IconAlertCircle, IconArrowLeft, IconDeviceFloppy, IconRestore, IconUpload } from '@tabler/icons-react'
+import { IconAlertCircle, IconArrowLeft, IconDeviceFloppy, IconRestore } from '@tabler/icons-react'
 import { FilePreviewGlyph } from '../features/file-preview-icon'
 import {
   filePreviewSpec,
@@ -365,15 +365,6 @@ export function ExplorerPreviewPage() {
                     </Text>
                   </div>
                 </Group>
-                <Button
-                  variant="default"
-                  leftSection={<IconUpload size={14} />}
-                  onClick={() =>
-                    navigate(`/app/explorer/details?irods_path=${encodeURIComponent(detailsQuery.data.path)}`)
-                  }
-                >
-                  Manage file
-                </Button>
               </Group>
 
               {!previewSpec.canOpenPreview ? (

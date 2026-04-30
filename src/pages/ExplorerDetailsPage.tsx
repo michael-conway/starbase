@@ -54,6 +54,7 @@ import {
   addPathACL,
   addAVU,
   actionLinkUrl,
+  addPathReplica,
   ApiError,
   computePathChecksum,
   createPathTicket,
@@ -66,6 +67,7 @@ import {
   getPath,
   getPathACL,
   getPathAVUs,
+  getResources,
   searchGroups,
   searchUsers,
   getTickets,
@@ -73,6 +75,8 @@ import {
   type PathACLResponse,
   renamePath,
   setPathACLInheritance,
+  movePathReplica,
+  trimPathReplica,
   type ActionLink,
   type PathEntry,
   type TicketEntry,
@@ -423,6 +427,13 @@ export function ExplorerDetailsPage() {
   const [renameDialog, setRenameDialog] = useState<RenameDialogState | null>(null)
   const [renameName, setRenameName] = useState('')
   const [commandHintsOpened, setCommandHintsOpened] = useState(false)
+  const [replicaAddResource, setReplicaAddResource] = useState('')
+  const [replicaAddUpdate, setReplicaAddUpdate] = useState(true)
+  const [replicaMoveSourceResource, setReplicaMoveSourceResource] = useState<string | null>(null)
+  const [replicaMoveDestinationResource, setReplicaMoveDestinationResource] = useState('')
+  const [replicaMoveUpdate, setReplicaMoveUpdate] = useState(true)
+  const [replicaMoveMinCopies, setReplicaMoveMinCopies] = useState('1')
+  const [replicaMoveMinAgeMinutes, setReplicaMoveMinAgeMinutes] = useState('0')
 
   const detailsQuery = useQuery({
     queryKey: ['path-detail', irodsPath, connection],
@@ -451,6 +462,12 @@ export function ExplorerDetailsPage() {
     queryKey: ['path-acls', irodsPath, connection],
     queryFn: () => getPathACL(irodsPath, connection.auth, connection.baseUrl),
     enabled: Boolean(irodsPath),
+  })
+  const resourcesQuery = useQuery({
+    queryKey: ['resources-top', connection.baseUrl, connection.auth.mode],
+    queryFn: () => getResources(connection.auth, connection.baseUrl, { scope: 'top' }),
+    enabled: Boolean(irodsPath),
+    staleTime: 60_000,
   })
   const aclPrincipalSearchTerm = aclPrincipalSearchValue.trim()
   const aclPrincipalQuery = useQuery({
@@ -754,6 +771,97 @@ export function ExplorerDetailsPage() {
       })
     },
   })
+  const addReplicaMutation = useMutation({
+    mutationFn: (input: { resource: string; update: boolean }) =>
+      addPathReplica(
+        irodsPath,
+        {
+          resource: input.resource,
+          update: input.update,
+        },
+        connection.auth,
+        connection.baseUrl,
+      ),
+    onSuccess: async () => {
+      notifications.show({
+        title: 'Replica added',
+        message: 'Data object replica created.',
+        color: 'teal',
+      })
+      setReplicaAddResource('')
+      await detailsQuery.refetch()
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'Replica add failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+  const moveReplicaMutation = useMutation({
+    mutationFn: (input: {
+      source_resource: string
+      destination_resource: string
+      update: boolean
+      min_copies: number
+      min_age_minutes: number
+    }) =>
+      movePathReplica(
+        irodsPath,
+        {
+          source_resource: input.source_resource,
+          destination_resource: input.destination_resource,
+          update: input.update,
+          min_copies: input.min_copies,
+          min_age_minutes: input.min_age_minutes,
+        },
+        connection.auth,
+        connection.baseUrl,
+      ),
+    onSuccess: async () => {
+      notifications.show({
+        title: 'Replica moved',
+        message: 'Replica phymove completed.',
+        color: 'teal',
+      })
+      setReplicaMoveDestinationResource('')
+      await detailsQuery.refetch()
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'Replica move failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+  const trimReplicaMutation = useMutation({
+    mutationFn: (input: { resource: string }) =>
+      trimPathReplica(
+        irodsPath,
+        {
+          resource: input.resource,
+        },
+        connection.auth,
+        connection.baseUrl,
+      ),
+    onSuccess: async () => {
+      notifications.show({
+        title: 'Replica trimmed',
+        message: 'Replica removed from the selected resource.',
+        color: 'teal',
+      })
+      await detailsQuery.refetch()
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'Replica trim failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
   const createTicketMutation = useMutation({
     mutationFn: (input: {
       href: ActionLink
@@ -941,6 +1049,28 @@ export function ExplorerDetailsPage() {
     () => [...(aclQuery.data?.users ?? []), ...(aclQuery.data?.groups ?? [])],
     [aclQuery.data],
   )
+  const replicaResourceOptions = useMemo(() => {
+    const resources = new Set<string>()
+    for (const replica of detailsQuery.data?.replicas ?? []) {
+      const resourceName = replica.resource_name?.trim()
+      if (resourceName) {
+        resources.add(resourceName)
+      }
+    }
+
+    return Array.from(resources).map((resourceName) => ({
+      value: resourceName,
+      label: resourceName,
+    }))
+  }, [detailsQuery.data?.replicas])
+  const topResourceOptions = useMemo(
+    () =>
+      (resourcesQuery.data?.resources ?? []).map((resource) => ({
+        value: resource.name,
+        label: resource.name,
+      })),
+    [resourcesQuery.data],
+  )
   const commandCue = detailsQuery.data?.cmd_cue
   const hasCommandHints = Boolean(commandCue?.gocmd?.trim() || commandCue?.icommand?.trim())
   const isCollection = detailsQuery.data?.kind === 'collection'
@@ -958,6 +1088,42 @@ export function ExplorerDetailsPage() {
     () => detailsQuery.data?.parent?.irods_path ?? '',
     [detailsQuery.data],
   )
+
+  useEffect(() => {
+    const firstResource = replicaResourceOptions[0]?.value ?? null
+    if (!firstResource) {
+      setReplicaMoveSourceResource(null)
+      return
+    }
+
+    setReplicaMoveSourceResource((current) => {
+      if (current && replicaResourceOptions.some((entry) => entry.value === current)) {
+        return current
+      }
+      return firstResource
+    })
+  }, [replicaResourceOptions])
+
+  useEffect(() => {
+    const firstTopResource = topResourceOptions[0]?.value ?? ''
+    if (!firstTopResource) {
+      return
+    }
+
+    setReplicaAddResource((current) => {
+      if (current && topResourceOptions.some((entry) => entry.value === current)) {
+        return current
+      }
+      return firstTopResource
+    })
+
+    setReplicaMoveDestinationResource((current) => {
+      if (current && topResourceOptions.some((entry) => entry.value === current)) {
+        return current
+      }
+      return firstTopResource
+    })
+  }, [topResourceOptions])
 
   const copyText = async (value: string, label: string) => {
     try {
@@ -1362,6 +1528,84 @@ export function ExplorerDetailsPage() {
       kind: detailsQuery.data.kind,
     })
     setRenameName(label)
+  }
+
+  const submitReplicaAdd = () => {
+    const resource = replicaAddResource.trim()
+    if (!resource) {
+      notifications.show({
+        title: 'Replica add is incomplete',
+        message: 'Target resource is required.',
+        color: 'red',
+      })
+      return
+    }
+
+    addReplicaMutation.mutate({
+      resource,
+      update: replicaAddUpdate,
+    })
+  }
+
+  const submitReplicaMove = () => {
+    const sourceResource = replicaMoveSourceResource?.trim() ?? ''
+    const destinationResource = replicaMoveDestinationResource.trim()
+    const minCopies = Number.parseInt(replicaMoveMinCopies.trim() || '0', 10)
+    const minAgeMinutes = Number.parseInt(replicaMoveMinAgeMinutes.trim() || '0', 10)
+
+    if (!sourceResource || !destinationResource) {
+      notifications.show({
+        title: 'Replica move is incomplete',
+        message: 'Source and destination resources are required.',
+        color: 'red',
+      })
+      return
+    }
+    if (sourceResource === destinationResource) {
+      notifications.show({
+        title: 'Replica move is invalid',
+        message: 'Destination resource must differ from source resource.',
+        color: 'red',
+      })
+      return
+    }
+    if (Number.isNaN(minCopies) || minCopies < 0 || Number.isNaN(minAgeMinutes) || minAgeMinutes < 0) {
+      notifications.show({
+        title: 'Replica move is invalid',
+        message: 'min_copies and min_age_minutes must be zero or greater integers.',
+        color: 'red',
+      })
+      return
+    }
+
+    moveReplicaMutation.mutate({
+      source_resource: sourceResource,
+      destination_resource: destinationResource,
+      update: replicaMoveUpdate,
+      min_copies: minCopies,
+      min_age_minutes: minAgeMinutes,
+    })
+  }
+
+  const submitReplicaTrim = (resourceName: string) => {
+    const resource = resourceName.trim()
+    if (!resource) {
+      notifications.show({
+        title: 'Replica trim is incomplete',
+        message: 'Resource is required.',
+        color: 'red',
+      })
+      return
+    }
+
+    const confirmed = window.confirm(`Delete replica on resource "${resource}"?`)
+    if (!confirmed) {
+      return
+    }
+
+    trimReplicaMutation.mutate({
+      resource,
+    })
   }
 
   if (!irodsPath) {
@@ -1940,6 +2184,102 @@ export function ExplorerDetailsPage() {
                             value={detailsQuery.data.replicas?.[0]?.owner ?? 'N/A'}
                           />
 
+                          <Divider label="Replica operations" labelPosition="left" />
+
+                          {resourcesQuery.isError ? (
+                            <Alert color="yellow" variant="light" title="Resource list unavailable">
+                              {resourcesQuery.error.message}
+                            </Alert>
+                          ) : null}
+
+                          <Paper withBorder radius="md" p="sm">
+                            <Stack gap="xs">
+                              <Text size="sm" fw={600}>
+                                Add replica
+                              </Text>
+                              <Group align="flex-end" gap="xs">
+                                <Select
+                                  label="Resource"
+                                  placeholder="Select resource"
+                                  data={topResourceOptions}
+                                  value={replicaAddResource || null}
+                                  onChange={(value) => setReplicaAddResource(value ?? '')}
+                                  searchable
+                                  allowDeselect={false}
+                                  disabled={addReplicaMutation.isPending || resourcesQuery.isLoading}
+                                />
+                                <Checkbox
+                                  label="Update"
+                                  checked={replicaAddUpdate}
+                                  onChange={(event) => setReplicaAddUpdate(event.currentTarget.checked)}
+                                  disabled={addReplicaMutation.isPending}
+                                />
+                                <Button
+                                  size="xs"
+                                  onClick={submitReplicaAdd}
+                                  loading={addReplicaMutation.isPending}
+                                >
+                                  Add
+                                </Button>
+                              </Group>
+                            </Stack>
+                          </Paper>
+
+                          <Paper withBorder radius="md" p="sm">
+                            <Stack gap="xs">
+                              <Text size="sm" fw={600}>
+                                Phymove replica
+                              </Text>
+                              <Group align="flex-end" gap="xs">
+                                <Select
+                                  label="Source resource"
+                                  data={replicaResourceOptions}
+                                  value={replicaMoveSourceResource}
+                                  onChange={(value) => setReplicaMoveSourceResource(value)}
+                                  allowDeselect={false}
+                                  disabled={moveReplicaMutation.isPending || replicaResourceOptions.length === 0}
+                                />
+                                <Select
+                                  label="Destination resource"
+                                  placeholder="Select resource"
+                                  data={topResourceOptions}
+                                  value={replicaMoveDestinationResource || null}
+                                  onChange={(value) => setReplicaMoveDestinationResource(value ?? '')}
+                                  searchable
+                                  allowDeselect={false}
+                                  disabled={moveReplicaMutation.isPending || resourcesQuery.isLoading}
+                                />
+                                <TextInput
+                                  label="min_copies"
+                                  value={replicaMoveMinCopies}
+                                  onChange={(event) => setReplicaMoveMinCopies(event.currentTarget.value)}
+                                  w={120}
+                                  disabled={moveReplicaMutation.isPending}
+                                />
+                                <TextInput
+                                  label="min_age_minutes"
+                                  value={replicaMoveMinAgeMinutes}
+                                  onChange={(event) => setReplicaMoveMinAgeMinutes(event.currentTarget.value)}
+                                  w={140}
+                                  disabled={moveReplicaMutation.isPending}
+                                />
+                                <Checkbox
+                                  label="Update"
+                                  checked={replicaMoveUpdate}
+                                  onChange={(event) => setReplicaMoveUpdate(event.currentTarget.checked)}
+                                  disabled={moveReplicaMutation.isPending}
+                                />
+                                <Button
+                                  size="xs"
+                                  onClick={submitReplicaMove}
+                                  loading={moveReplicaMutation.isPending}
+                                >
+                                  Move
+                                </Button>
+                              </Group>
+                            </Stack>
+                          </Paper>
+
                           <Divider label="Replicas" labelPosition="left" />
 
                           {detailsQuery.data.replicas?.length ? (
@@ -1959,22 +2299,35 @@ export function ExplorerDetailsPage() {
                                     <Table.Td>{replica.number}</Table.Td>
                                     <Table.Td>
                                       <Stack gap={2}>
-                                        {replica.resource_name ? (
-                                          <Anchor
-                                            size="sm"
-                                            fw={600}
-                                            underline="never"
-                                            onClick={() =>
-                                              openResourceDetails(replica.resource_name!)
-                                            }
-                                          >
-                                            {replica.resource_name}
-                                          </Anchor>
-                                        ) : (
-                                          <Text size="sm" fw={600}>
-                                            N/A
-                                          </Text>
-                                        )}
+                                        <Group gap="xs" wrap="nowrap" align="center">
+                                          {replica.resource_name ? (
+                                            <Anchor
+                                              size="sm"
+                                              fw={600}
+                                              underline="never"
+                                              onClick={() =>
+                                                openResourceDetails(replica.resource_name!)
+                                              }
+                                            >
+                                              {replica.resource_name}
+                                            </Anchor>
+                                          ) : (
+                                            <Text size="sm" fw={600}>
+                                              N/A
+                                            </Text>
+                                          )}
+                                          {replica.resource_name ? (
+                                            <ActionIcon
+                                              variant="subtle"
+                                              color="red"
+                                              aria-label={`Delete replica on ${replica.resource_name}`}
+                                              onClick={() => submitReplicaTrim(replica.resource_name!)}
+                                              disabled={trimReplicaMutation.isPending}
+                                            >
+                                              <IconTrash size={16} />
+                                            </ActionIcon>
+                                          ) : null}
+                                        </Group>
                                         <Text size="xs" c="dimmed">
                                           {replica.resource_hierarchy ?? 'No hierarchy'}
                                         </Text>
