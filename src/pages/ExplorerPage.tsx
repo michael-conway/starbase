@@ -1,21 +1,20 @@
-import { startTransition, useEffect, useMemo, useState } from 'react'
+import { useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ActionIcon,
-  Alert,
   Anchor,
+  Alert,
   Badge,
+  Breadcrumbs,
   Button,
   Card,
-  Code,
-  CopyButton,
-  Divider,
-  Grid,
+  Checkbox,
   Group,
-  Paper,
-  PasswordInput,
-  SegmentedControl,
-  SimpleGrid,
+  Loader,
+  Modal,
+  Radio,
   Stack,
+  Switch,
   Table,
   Text,
   TextInput,
@@ -23,463 +22,916 @@ import {
   Title,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   IconAlertCircle,
-  IconBinaryTree2,
-  IconCircleCheck,
-  IconCopy,
+  IconCheck,
+  IconDots,
   IconDatabase,
-  IconFileInfo,
-  IconKey,
-  IconRoute2,
-  IconShieldLock,
-  IconSparkles,
+  IconEdit,
+  IconFile,
+  IconFolder,
+  IconHome2,
+  IconPlus,
+  IconRefresh,
+  IconUpload,
+  IconTrash,
+  IconX,
 } from '@tabler/icons-react'
-import {
-  ApiError,
-  type CollectionRecord,
-  getCollection,
-  getObject,
-  type ObjectRecord,
-} from '../lib/irods-rest'
+import { displayName, formatDateTime, homePathForUser } from '../features/explorer'
+import { ApiError, createPathChild, deletePath, getPath, getPathChildren, renamePath, type PathEntry } from '../lib/irods-rest'
+import { useSession } from '../providers/session'
+import { useUploadManager } from '../providers/upload-context'
 
-type ResourceKind = 'object' | 'collection'
+type CreateKind = 'collection' | 'data_object'
 
-type ResourceResult =
-  | { kind: 'object'; data: ObjectRecord }
-  | { kind: 'collection'; data: CollectionRecord }
-
-const baseUrlStorageKey = 'irods-rest-console.base-url'
-const tokenStorageKey = 'irods-rest-console.token'
-
-function readStorage(key: string, fallback = '') {
-  return window.localStorage.getItem(key) ?? fallback
+interface DeleteDialogState {
+  path: string
+  label: string
+  kind: PathEntry['kind']
 }
 
-function formatBytes(size: number) {
-  return new Intl.NumberFormat('en-US', {
-    notation: size > 100_000 ? 'compact' : 'standard',
-    maximumFractionDigits: 1,
-  }).format(size)
+interface RenameState {
+  path: string
+  draftName: string
+  kind: PathEntry['kind']
 }
 
-function metadataRows(metadata?: Record<string, string>) {
-  if (!metadata || Object.keys(metadata).length === 0) {
-    return (
-      <Table.Tr>
-        <Table.Td colSpan={2}>
-          <Text c="dimmed" size="sm">
-            No AVU metadata returned.
-          </Text>
-        </Table.Td>
-      </Table.Tr>
-    )
+function quickLocations(path: string, username?: string) {
+  const segments = path.split('/').filter(Boolean)
+  const zoneRoot = segments[0] ? `/${segments[0]}` : '/tempZone'
+  const homePath = homePathForUser(username, path)
+
+  return [
+    {
+      label: 'Home',
+      path: homePath,
+      icon: IconHome2,
+    },
+    {
+      label: 'Zone',
+      path: zoneRoot,
+      icon: IconDatabase,
+    },
+  ]
+}
+
+function listingErrorDetails(error: Error) {
+  if (error instanceof ApiError && error.status === 403) {
+    return {
+      title: 'Unable to list collection',
+      message: 'You do not have permission to list this collection.',
+    }
   }
 
-  return Object.entries(metadata).map(([key, value]) => (
-    <Table.Tr key={key}>
-      <Table.Td>
-        <Code>{key}</Code>
-      </Table.Td>
-      <Table.Td>{value}</Table.Td>
-    </Table.Tr>
-  ))
+  return {
+    title: 'Unable to load collection',
+    message: error.message,
+  }
 }
 
 export function ExplorerPage() {
-  const [resourceKind, setResourceKind] = useState<ResourceKind>('object')
-  const [identifier, setIdentifier] = useState('demo-object')
-  const [token, setToken] = useState(() => readStorage(tokenStorageKey))
-  const [baseUrl, setBaseUrl] = useState(() => readStorage(baseUrlStorageKey))
+  const { basicUsername, connection } = useSession()
+  const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const userHomePath = homePathForUser(basicUsername)
+  const initialPath = searchParams.get('irods_path')?.trim() || userHomePath
+  const [draftPathState, setDraftPathState] = useState({
+    sourcePath: initialPath,
+    value: initialPath,
+  })
+  const [selectedChildrenState, setSelectedChildrenState] = useState<{
+    path: string
+    selected: string[]
+  }>({
+    path: initialPath,
+    selected: [],
+  })
+  const [createModalOpen, setCreateModalOpen] = useState(false)
+  const [createKind, setCreateKind] = useState<CreateKind>('collection')
+  const [createName, setCreateName] = useState('new folder')
+  const [createIntermediateCollections, setCreateIntermediateCollections] = useState(false)
+  const [deleteDialog, setDeleteDialog] = useState<DeleteDialogState | null>(null)
+  const [deleteForce, setDeleteForce] = useState(false)
+  const [renameState, setRenameState] = useState<RenameState | null>(null)
+  const [dropTargetPath, setDropTargetPath] = useState<string | null>(null)
+  const { requestFilesUpload, openFilePicker } = useUploadManager()
+  const selectedPath = initialPath
+  const draftPath =
+    draftPathState.sourcePath === initialPath ? draftPathState.value : initialPath
+  const selectedChildren =
+    selectedChildrenState.path === initialPath ? selectedChildrenState.selected : []
 
-  useEffect(() => {
-    window.localStorage.setItem(tokenStorageKey, token)
-  }, [token])
+  const setDraftPath = (value: string) => {
+    setDraftPathState({
+      sourcePath: initialPath,
+      value,
+    })
+  }
 
-  useEffect(() => {
-    window.localStorage.setItem(baseUrlStorageKey, baseUrl)
-  }, [baseUrl])
+  const setSelectedChildren = (
+    selected: string[] | ((current: string[]) => string[]),
+  ) => {
+    const nextSelected =
+      typeof selected === 'function' ? selected(selectedChildren) : selected
 
-  const placeholder = useMemo(
-    () => (resourceKind === 'object' ? 'demo-object' : 'demo-collection'),
-    [resourceKind],
-  )
+    setSelectedChildrenState({
+      path: initialPath,
+      selected: nextSelected,
+    })
+  }
 
-  const lookupMutation = useMutation<ResourceResult, ApiError, void>({
-    mutationFn: async () => {
-      const trimmedToken = token.trim()
-      const trimmedIdentifier = identifier.trim()
-      const trimmedBaseUrl = baseUrl.trim()
+  const setCreateDefaults = (kind: CreateKind) => {
+    setCreateKind(kind)
+    setCreateName(kind === 'collection' ? 'new folder' : 'new file')
+    setCreateIntermediateCollections(false)
+  }
 
-      if (!trimmedToken) {
-        throw new ApiError(401, 'A bearer token is required for API calls.')
+  const openCollection = (nextPath: string) => {
+    const normalized = nextPath.trim() || userHomePath
+    setDraftPath(normalized)
+    setSearchParams(normalized === userHomePath ? {} : { irods_path: normalized })
+    setSelectedChildrenState({
+      path: normalized,
+      selected: [],
+    })
+  }
+
+  const openPath = async (nextPath: string) => {
+    const normalized = nextPath.trim() || userHomePath
+
+    try {
+      const entry = await getPath(normalized, connection.auth, connection.baseUrl)
+
+      if (entry.kind === 'collection') {
+        openCollection(normalized)
+        return
       }
 
-      if (!trimmedIdentifier) {
-        throw new ApiError(400, 'Enter an object or collection identifier.')
-      }
-
-      if (resourceKind === 'object') {
-        const data = await getObject(trimmedIdentifier, trimmedToken, trimmedBaseUrl)
-        return { kind: 'object', data }
-      }
-
-      const data = await getCollection(
-        trimmedIdentifier,
-        trimmedToken,
-        trimmedBaseUrl,
-      )
-      return { kind: 'collection', data }
-    },
-    onSuccess: (result) => {
+      navigate(`/app/explorer/details?irods_path=${encodeURIComponent(normalized)}`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to open path'
       notifications.show({
-        title: `${result.kind} loaded`,
-        message: result.data.path,
+        title: 'Open failed',
+        message,
+        color: 'red',
+      })
+    }
+  }
+
+  const openDetails = (nextPath: string) => {
+    const normalized = nextPath.trim() || userHomePath
+    navigate(`/app/explorer/details?irods_path=${encodeURIComponent(normalized)}`)
+  }
+
+  const entryQuery = useQuery({
+    queryKey: ['path-entry', selectedPath, connection],
+    queryFn: () => getPath(selectedPath, connection.auth, connection.baseUrl),
+  })
+
+  const childrenQuery = useQuery({
+    queryKey: ['path-children', selectedPath, connection],
+    queryFn: () => getPathChildren(selectedPath, connection.auth, connection.baseUrl),
+    enabled:
+      entryQuery.data?.kind === 'collection' && entryQuery.data.path === selectedPath,
+  })
+
+  const refreshMutation = useMutation({
+    mutationFn: async () => {
+      const entry = await getPath(selectedPath, connection.auth, connection.baseUrl)
+      if (entry.kind === 'collection') {
+        await getPathChildren(selectedPath, connection.auth, connection.baseUrl)
+      }
+      return entry
+    },
+    onSuccess: (entry) => {
+      notifications.show({
+        title: 'View refreshed',
+        message: entry.path,
         color: 'teal',
       })
+      void entryQuery.refetch()
+      void childrenQuery.refetch()
     },
-    onError: (error) => {
+    onError: (error: Error) => {
       notifications.show({
-        title: `Lookup failed (${error.status})`,
+        title: 'Refresh failed',
         message: error.message,
         color: 'red',
       })
     },
   })
 
-  const result = lookupMutation.data
+  const createChildMutation = useMutation({
+    mutationFn: async () => {
+      if (!entry || entry.kind !== 'collection') {
+        throw new ApiError(400, 'Open a collection before creating a child path.')
+      }
+
+      const childName = createName.trim()
+      if (!childName) {
+        throw new ApiError(400, 'Enter a name for the new item.')
+      }
+
+      return createPathChild(
+        entry.path,
+        {
+          child_name: childName,
+          kind: createKind,
+          mkdirs: createKind === 'collection' ? createIntermediateCollections : undefined,
+        },
+        connection.auth,
+        connection.baseUrl,
+      )
+    },
+    onSuccess: (created) => {
+      notifications.show({
+        title: created.kind === 'collection' ? 'Folder created' : 'File created',
+        message: created.path,
+        color: 'teal',
+      })
+      setCreateModalOpen(false)
+      void entryQuery.refetch()
+      void childrenQuery.refetch()
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'Create failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+
+  const deletePathMutation = useMutation({
+    mutationFn: async () => {
+      if (!deleteDialog) {
+        throw new ApiError(400, 'No delete target was selected.')
+      }
+
+      await deletePath(deleteDialog.path, connection.auth, connection.baseUrl, {
+        force: deleteForce,
+      })
+
+      return deleteDialog
+    },
+    onSuccess: (deleted) => {
+      notifications.show({
+        title: deleted.kind === 'collection' ? 'Folder deleted' : 'File deleted',
+        message: deleted.path,
+        color: 'teal',
+      })
+      setSelectedChildren((current) => current.filter((path) => path !== deleted.path))
+      setDeleteDialog(null)
+      setDeleteForce(false)
+      void entryQuery.refetch()
+      void childrenQuery.refetch()
+    },
+    onError: (error: Error) => {
+      if (error instanceof ApiError && error.status === 409) {
+        setDeleteForce(true)
+        notifications.show({
+          title: 'Folder is not empty',
+          message: 'Enable force delete to remove this collection recursively.',
+          color: 'yellow',
+        })
+        return
+      }
+
+      notifications.show({
+        title: 'Delete failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+  const renamePathMutation = useMutation({
+    mutationFn: async () => {
+      if (!renameState) {
+        throw new ApiError(400, 'No rename target was selected.')
+      }
+
+      const newName = renameState.draftName.trim()
+      if (!newName) {
+        throw new ApiError(400, 'Enter a new name.')
+      }
+
+      return renamePath(
+        renameState.path,
+        {
+          new_name: newName,
+        },
+        connection.auth,
+        connection.baseUrl,
+      )
+    },
+    onSuccess: (renamed) => {
+      notifications.show({
+        title: renamed.kind === 'collection' ? 'Folder renamed' : 'File renamed',
+        message: renamed.path,
+        color: 'teal',
+      })
+      setSelectedChildren((current) =>
+        current.map((path) => (path === renameState?.path ? renamed.path : path)),
+      )
+      setRenameState(null)
+      void entryQuery.refetch()
+      void childrenQuery.refetch()
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'Rename failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+
+  const entry = entryQuery.data
+  const childrenResponse =
+    childrenQuery.data?.irods_path === selectedPath ? childrenQuery.data : undefined
+  const children = childrenResponse?.children ?? []
+  const breadcrumbs = childrenResponse?.path_segments ?? entry?.path_segments ?? []
+  const locationOptions = quickLocations(selectedPath, basicUsername)
+  const listingError = childrenQuery.isError ? listingErrorDetails(childrenQuery.error) : null
+  const allChildrenSelected = children.length > 0 && selectedChildren.length === children.length
+  const someChildrenSelected =
+    selectedChildren.length > 0 && selectedChildren.length < children.length
+
+  const toggleChildSelection = (childPath: string) => {
+    setSelectedChildren((current) =>
+      current.includes(childPath)
+        ? current.filter((path) => path !== childPath)
+        : [...current, childPath],
+    )
+  }
+
+  const toggleAllChildren = () => {
+    setSelectedChildren(allChildrenSelected ? [] : children.map((child) => child.path))
+  }
+
+  const openCreateModal = (kind: CreateKind) => {
+    setCreateDefaults(kind)
+    setCreateModalOpen(true)
+  }
+
+  const openDeleteDialog = (child: PathEntry) => {
+    const childLabel = child.path_segments.at(-1)?.display_name ?? displayName(child.path)
+    const requiresForce = child.kind === 'collection' && Boolean(child.hasChildren || (child.childCount ?? 0) > 0)
+
+    setDeleteDialog({
+      path: child.path,
+      label: childLabel,
+      kind: child.kind,
+    })
+    setDeleteForce(requiresForce)
+  }
+
+  const canHandleDragFiles = (event: React.DragEvent) =>
+    Array.from(event.dataTransfer.types).includes('Files')
+
+  const startUploadToPath = (files: File[], targetPath: string, targetLabel?: string) => {
+    if (files.length === 0) {
+      return
+    }
+
+    requestFilesUpload(files, {
+      targetPath,
+      targetLabel,
+    })
+  }
+
+  const beginRename = (child: PathEntry) => {
+    setRenameState({
+      path: child.path,
+      draftName: child.path_segments.at(-1)?.display_name ?? displayName(child.path),
+      kind: child.kind,
+    })
+  }
+
+  const cancelRename = () => {
+    if (!renamePathMutation.isPending) {
+      setRenameState(null)
+    }
+  }
+
+  const updateRenameDraft = (draftName: string) => {
+    setRenameState((current) => (current ? { ...current, draftName } : current))
+  }
 
   return (
-    <Stack gap="xl">
-      <Paper className="hero-panel" radius="xl" p="xl">
-        <Group justify="space-between" align="flex-start" gap="xl">
-          <Stack gap="sm">
-            <Badge variant="filled" color="dark">
-              iRODS data access
-            </Badge>
-            <Title order={1} maw={620}>
-              Search iRODS object and collection records through the
-              `irods-go-rest` API.
-            </Title>
-            <Text size="lg" c="dimmed" maw={760}>
-              This starter favors a clean operator console: direct bearer-token
-              auth, contract-aligned fetches, and a structure that can grow into
-              a fuller browser without rewrites.
+    <div className="explorer-layout">
+      <Modal
+        opened={createModalOpen}
+        onClose={() => {
+          if (!createChildMutation.isPending) {
+            setCreateModalOpen(false)
+          }
+        }}
+        title={createKind === 'collection' ? 'New folder' : 'New file'}
+        centered
+      >
+        <Stack gap="md">
+          <Radio.Group
+            label="Create"
+            value={createKind}
+            onChange={(value) => setCreateDefaults(value as CreateKind)}
+          >
+            <Group mt="xs">
+              <Radio value="collection" label="Folder" />
+              <Radio value="data_object" label="File" />
+            </Group>
+          </Radio.Group>
+
+          <TextInput
+            label="Name"
+            value={createName}
+            onChange={(event) => setCreateName(event.currentTarget.value)}
+            placeholder={createKind === 'collection' ? 'new folder' : 'new file'}
+            autoFocus
+          />
+
+          {createKind === 'collection' ? (
+            <Switch
+              label="Create intermediate folders"
+              checked={createIntermediateCollections}
+              onChange={(event) =>
+                setCreateIntermediateCollections(event.currentTarget.checked)
+              }
+            />
+          ) : null}
+
+          <Group justify="flex-end">
+            <Button
+              variant="default"
+              onClick={() => setCreateModalOpen(false)}
+              disabled={createChildMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => createChildMutation.mutate()}
+              loading={createChildMutation.isPending}
+            >
+              Create
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={deleteDialog !== null}
+        onClose={() => {
+          if (!deletePathMutation.isPending) {
+            setDeleteDialog(null)
+            setDeleteForce(false)
+          }
+        }}
+        title={deleteDialog?.kind === 'collection' ? 'Delete folder' : 'Delete file'}
+        centered
+      >
+        <Stack gap="md">
+          <Text>
+            Delete <strong>{deleteDialog?.label}</strong>?
+          </Text>
+
+          {deleteDialog?.kind === 'collection' ? (
+            <>
+              <Text size="sm" c="dimmed">
+                Non-empty collections require force delete, which removes the folder
+                recursively.
+              </Text>
+              <Switch
+                label="Force recursive delete"
+                checked={deleteForce}
+                onChange={(event) => setDeleteForce(event.currentTarget.checked)}
+              />
+            </>
+          ) : null}
+
+          <Group justify="flex-end">
+            <Button
+              variant="default"
+              onClick={() => {
+                setDeleteDialog(null)
+                setDeleteForce(false)
+              }}
+              disabled={deletePathMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              color="red"
+              onClick={() => deletePathMutation.mutate()}
+              loading={deletePathMutation.isPending}
+            >
+              Delete
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Card shadow="sm" radius="xl" padding="lg" className="explorer-sidebar">
+        <Stack gap="lg">
+          <div>
+            <Text size="xs" tt="uppercase" fw={700} c="dimmed">
+              Locations
             </Text>
+          </div>
+
+          <Stack gap="xs">
+            {locationOptions.map((location) => (
+              <Button
+                key={`${location.label}-${location.path}`}
+                justify="flex-start"
+                variant={selectedPath === location.path ? 'light' : 'subtle'}
+                leftSection={<location.icon size={16} />}
+                onClick={() => openCollection(location.path)}
+              >
+                {location.label}
+              </Button>
+            ))}
           </Stack>
+        </Stack>
+      </Card>
 
-          <SimpleGrid cols={1} spacing="sm" miw={240}>
-            <StatCard
-              icon={IconDatabase}
-              label="Backend"
-              value="irods-go-rest"
-              note="/api/v1/* over bearer auth"
-            />
-            <StatCard
-              icon={IconSparkles}
-              label="UI stack"
-              value="Mantine"
-              note="Polished primitives with minimal ceremony"
-            />
-          </SimpleGrid>
-        </Group>
-      </Paper>
+      <Card
+        shadow="sm"
+        radius="xl"
+        padding="lg"
+        className={`explorer-main explorer-main-wide${
+          dropTargetPath === selectedPath ? ' explorer-drop-target-active' : ''
+        }`}
+        onDragOver={(event) => {
+          if (entry?.kind !== 'collection' || !canHandleDragFiles(event)) {
+            return
+          }
 
-      <Grid gap="lg">
-        <Grid.Col span={{ base: 12, md: 5 }}>
-          <Stack gap="lg">
-            <Card shadow="sm" radius="xl" padding="lg">
-              <Stack gap="md">
-                <Group gap="sm">
-                  <ThemeIcon variant="light" color="cyan" size="lg">
-                    <IconRoute2 size={18} />
-                  </ThemeIcon>
-                  <div>
-                    <Title order={3}>Connection</Title>
-                    <Text size="sm" c="dimmed">
-                      Leave the base URL empty during local Vite development to
-                      use the built-in proxy to `http://localhost:8080`.
-                    </Text>
-                  </div>
-                </Group>
+          event.preventDefault()
+          setDropTargetPath(selectedPath)
+        }}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+            setDropTargetPath((current) => (current === selectedPath ? null : current))
+          }
+        }}
+        onDrop={(event) => {
+          if (entry?.kind !== 'collection') {
+            return
+          }
 
-                <TextInput
-                  label="API base URL"
-                  placeholder="Use dev proxy when blank"
-                  value={baseUrl}
-                  onChange={(event) => setBaseUrl(event.currentTarget.value)}
-                />
-
-                <PasswordInput
-                  label="Bearer token"
-                  placeholder="Paste a Keycloak access token"
-                  value={token}
-                  onChange={(event) => setToken(event.currentTarget.value)}
-                  leftSection={<IconShieldLock size={16} />}
-                />
-
-                <Alert
-                  variant="light"
-                  color="blue"
-                  icon={<IconKey size={16} />}
-                  title="Token source"
-                >
-                  The current API expects <Code>Authorization: Bearer</Code>.
-                  Use the backend&apos;s browser login flow at{' '}
-                  <Anchor href="/web/login" target="_blank">
-                    /web/login
-                  </Anchor>{' '}
-                  or pull a token from Keycloak directly.
-                </Alert>
-              </Stack>
-            </Card>
-
-            <Card shadow="sm" radius="xl" padding="lg">
-              <Stack gap="md">
-                <Group gap="sm">
-                  <ThemeIcon variant="light" color="teal" size="lg">
-                    <IconFileInfo size={18} />
-                  </ThemeIcon>
-                  <div>
-                    <Title order={3}>Lookup</Title>
-                    <Text size="sm" c="dimmed">
-                      Switch between object and collection metadata lookups.
-                    </Text>
-                  </div>
-                </Group>
-
-                <SegmentedControl
-                  fullWidth
-                  value={resourceKind}
-                  onChange={(value) => {
-                    startTransition(() => {
-                      const next = value as ResourceKind
-                      setResourceKind(next)
-                      setIdentifier(next === 'object' ? 'demo-object' : 'demo-collection')
-                    })
-                  }}
-                  data={[
-                    { label: 'Object', value: 'object' },
-                    { label: 'Collection', value: 'collection' },
-                  ]}
-                />
-
-                <TextInput
-                  label={`${resourceKind} identifier`}
-                  placeholder={placeholder}
-                  value={identifier}
-                  onChange={(event) => setIdentifier(event.currentTarget.value)}
-                />
-
-                <Group gap="sm">
-                  <Button
-                    onClick={() => lookupMutation.mutate()}
-                    loading={lookupMutation.isPending}
-                  >
-                    Run lookup
-                  </Button>
-                  <Button
-                    variant="default"
-                    onClick={() =>
-                      setIdentifier(
-                        resourceKind === 'object' ? 'demo-object' : 'demo-collection',
-                      )
-                    }
-                  >
-                    Use sample
-                  </Button>
-                </Group>
-              </Stack>
-            </Card>
-          </Stack>
-        </Grid.Col>
-
-        <Grid.Col span={{ base: 12, md: 7 }}>
-          <Card shadow="sm" radius="xl" padding="lg" mih={520}>
-            <Stack gap="lg">
-              <Group justify="space-between" align="flex-start">
-                <div>
-                  <Title order={3}>Result</Title>
-                  <Text size="sm" c="dimmed">
-                    Contract-aligned rendering for the current OpenAPI schema.
-                  </Text>
-                </div>
-                {result ? (
-                  <Badge variant="light" color="teal">
-                    {result.kind}
-                  </Badge>
-                ) : null}
+          event.preventDefault()
+          setDropTargetPath(null)
+          startUploadToPath(
+            Array.from(event.dataTransfer.files),
+            selectedPath,
+            displayName(selectedPath),
+          )
+        }}
+      >
+        <Stack gap="md">
+          <Group justify="space-between" align="center">
+            <div>
+              <Title order={2}>iRODS Explorer</Title>
+            </div>
+            {entry ? (
+              <Group gap="xs">
+                <Badge variant="light" color="blue">
+                  {entry.kind}
+                </Badge>
               </Group>
+            ) : null}
+          </Group>
 
-              {lookupMutation.isIdle ? (
-                <EmptyState />
-              ) : null}
+          <Breadcrumbs>
+            {breadcrumbs.map((crumb) => (
+              <Button
+                key={crumb.irods_path}
+                variant="subtle"
+                size="xs"
+                onClick={() => openCollection(crumb.irods_path)}
+              >
+                {crumb.display_name}
+              </Button>
+            ))}
+          </Breadcrumbs>
 
-              {lookupMutation.isError ? (
-                <Alert
-                  color="red"
-                  variant="light"
-                  icon={<IconAlertCircle size={18} />}
-                  title="Request error"
-                >
-                  {lookupMutation.error.message}
-                </Alert>
-              ) : null}
+          <div className="explorer-menubar">
+            <Button
+              leftSection={<IconPlus size={16} />}
+              variant="light"
+              onClick={() => openCreateModal('collection')}
+              disabled={entry?.kind !== 'collection'}
+            >
+              New folder
+            </Button>
+            <Button
+              leftSection={<IconPlus size={16} />}
+              variant="light"
+              onClick={() => openCreateModal('data_object')}
+              disabled={entry?.kind !== 'collection'}
+            >
+              New file
+            </Button>
+            <Button
+              leftSection={<IconUpload size={16} />}
+              variant="default"
+              onClick={() =>
+                openFilePicker({
+                  targetPath: selectedPath,
+                  targetLabel: displayName(selectedPath),
+                })
+              }
+              disabled={entry?.kind !== 'collection'}
+            >
+              Upload
+            </Button>
+            <Button
+              leftSection={<IconRefresh size={16} />}
+              variant="light"
+              onClick={() => refreshMutation.mutate()}
+              loading={refreshMutation.isPending}
+            >
+              Refresh
+            </Button>
+            <Button
+              leftSection={<IconDots size={16} />}
+              variant="light"
+              onClick={() => openDetails(selectedPath)}
+              disabled={entry?.kind !== 'collection'}
+            >
+              Collection details
+            </Button>
+            <TextInput
+              placeholder={userHomePath}
+              value={draftPath}
+                  onChange={(event) => setDraftPath(event.currentTarget.value)}
+              className="explorer-path-input"
+            />
+            <Button onClick={() => void openPath(draftPath)}>Open path</Button>
+          </div>
 
-              {result ? (
-                <Stack gap="lg">
-                  <Paper withBorder radius="lg" p="md">
-                    <Group justify="space-between" align="flex-start">
-                      <div>
-                        <Group gap="xs">
-                          <Title order={4}>{result.data.id}</Title>
-                          <CopyButton value={result.data.path}>
-                            {({ copied, copy }) => (
-                              <ActionIcon
-                                variant="subtle"
-                                color={copied ? 'teal' : 'gray'}
-                                onClick={copy}
-                              >
-                                {copied ? (
-                                  <IconCircleCheck size={16} />
-                                ) : (
-                                  <IconCopy size={16} />
-                                )}
-                              </ActionIcon>
-                            )}
-                          </CopyButton>
-                        </Group>
-                        <Text c="dimmed">{result.data.path}</Text>
-                      </div>
-                      <Badge variant="dot" color="blue">
-                        zone {result.data.zone}
-                      </Badge>
-                    </Group>
-                  </Paper>
+          {entryQuery.isLoading ? (
+            <Group justify="center" py="xl">
+              <Loader />
+            </Group>
+          ) : null}
 
-                  <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
-                    <InfoCard
-                      label="Path"
-                      value={result.data.path}
-                      icon={IconRoute2}
+          {entryQuery.isError ? (
+            <Alert
+              color="red"
+              variant="light"
+              icon={<IconAlertCircle size={18} />}
+              title="Unable to load path"
+            >
+              {entryQuery.error.message}
+            </Alert>
+          ) : null}
+
+          {entry && entry.kind === 'collection' ? (
+            <Table highlightOnHover verticalSpacing="sm">
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th w={52}>
+                    <Checkbox
+                      aria-label="Select all items"
+                      checked={allChildrenSelected}
+                      indeterminate={someChildrenSelected}
+                      onChange={toggleAllChildren}
+                      disabled={!children.length}
                     />
-                    <InfoCard
-                      label="Zone"
-                      value={result.data.zone}
-                      icon={IconBinaryTree2}
-                    />
-                    {result.kind === 'object' ? (
-                      <>
-                        <InfoCard
-                          label="Checksum"
-                          value={result.data.checksum}
-                          icon={IconShieldLock}
-                        />
-                        <InfoCard
-                          label="Size"
-                          value={`${result.data.size} bytes (${formatBytes(result.data.size)})`}
-                          icon={IconDatabase}
-                        />
-                      </>
-                    ) : (
-                      <InfoCard
-                        label="Children"
-                        value={`${result.data.childCount ?? 0}`}
-                        icon={IconDatabase}
+                  </Table.Th>
+                  <Table.Th w={56}></Table.Th>
+                  <Table.Th>Name</Table.Th>
+                  <Table.Th>Kind</Table.Th>
+                  <Table.Th>Size</Table.Th>
+                  <Table.Th>Created</Table.Th>
+                  <Table.Th>Updated</Table.Th>
+                  <Table.Th w={64}></Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {listingError ? (
+                  <Table.Tr>
+                    <Table.Td colSpan={8}>
+                      <Alert
+                        color="red"
+                        variant="light"
+                        icon={<IconAlertCircle size={18} />}
+                        title={listingError.title}
+                      >
+                        {listingError.message}
+                      </Alert>
+                    </Table.Td>
+                  </Table.Tr>
+                ) : null}
+                {children.map((child) => (
+                  (() => {
+                    const isRenaming = renameState?.path === child.path
+                    const isCollectionDropTarget =
+                      child.kind === 'collection' && dropTargetPath === child.path
+                    return (
+                  <Table.Tr
+                    key={child.path}
+                    className={`explorer-clickable-row${
+                      selectedChildren.includes(child.path) ? ' explorer-row-selected' : ''
+                    }${isCollectionDropTarget ? ' explorer-row-drop-target' : ''}${
+                      child.kind === 'collection' ? ' explorer-collection-row' : ''
+                    }`}
+                    onClick={() => {
+                      if (!isRenaming) {
+                        void openPath(child.path)
+                      }
+                    }}
+                    onKeyDown={(event) => {
+                      if (!isRenaming && (event.key === 'Enter' || event.key === ' ')) {
+                        event.preventDefault()
+                        void openPath(child.path)
+                      }
+                    }}
+                    tabIndex={0}
+                    onDragOver={(event) => {
+                      if (child.kind !== 'collection' || !canHandleDragFiles(event)) {
+                        return
+                      }
+
+                      event.preventDefault()
+                      event.stopPropagation()
+                      setDropTargetPath(child.path)
+                    }}
+                    onDragLeave={(event) => {
+                      if (child.kind !== 'collection') {
+                        return
+                      }
+
+                      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                        setDropTargetPath((current) => (current === child.path ? null : current))
+                      }
+                    }}
+                    onDrop={(event) => {
+                      if (child.kind !== 'collection') {
+                        return
+                      }
+
+                      event.preventDefault()
+                      event.stopPropagation()
+                      setDropTargetPath(null)
+                      startUploadToPath(
+                        Array.from(event.dataTransfer.files),
+                        child.path,
+                        child.path_segments.at(-1)?.display_name ?? displayName(child.path),
+                      )
+                    }}
+                  >
+                    <Table.Td>
+                      <Checkbox
+                        aria-label={`Select ${displayName(child.path)}`}
+                        checked={selectedChildren.includes(child.path)}
+                        onChange={() => toggleChildSelection(child.path)}
+                        onClick={(event) => event.stopPropagation()}
                       />
-                    )}
-                  </SimpleGrid>
-
-                  <Divider label="Metadata" labelPosition="left" />
-
-                  <Table highlightOnHover>
-                    <Table.Thead>
-                      <Table.Tr>
-                        <Table.Th>Attribute</Table.Th>
-                        <Table.Th>Value</Table.Th>
-                      </Table.Tr>
-                    </Table.Thead>
-                    <Table.Tbody>{metadataRows(result.data.metadata)}</Table.Tbody>
-                  </Table>
-                </Stack>
-              ) : null}
-            </Stack>
-          </Card>
-        </Grid.Col>
-      </Grid>
-    </Stack>
-  )
-}
-
-function EmptyState() {
-  return (
-    <Stack align="center" justify="center" mih={360} gap="sm">
-      <ThemeIcon size={64} radius="xl" variant="light" color="cyan">
-        <IconFileInfo size={32} />
-      </ThemeIcon>
-      <Title order={4}>No lookup yet</Title>
-      <Text c="dimmed" ta="center" maw={420}>
-        Enter a token, choose a resource type, and query a record from the
-        running `irods-go-rest` service.
-      </Text>
-    </Stack>
-  )
-}
-
-function StatCard({
-  icon: Icon,
-  label,
-  value,
-  note,
-}: {
-  icon: typeof IconDatabase
-  label: string
-  value: string
-  note: string
-}) {
-  return (
-    <Paper withBorder radius="lg" p="md">
-      <Group wrap="nowrap" align="flex-start">
-        <ThemeIcon size="lg" variant="light" color="dark">
-          <Icon size={18} />
-        </ThemeIcon>
-        <div>
-          <Text size="xs" tt="uppercase" c="dimmed">
-            {label}
-          </Text>
-          <Text fw={700}>{value}</Text>
-          <Text size="sm" c="dimmed">
-            {note}
-          </Text>
-        </div>
-      </Group>
-    </Paper>
-  )
-}
-
-function InfoCard({
-  label,
-  value,
-  icon: Icon,
-}: {
-  label: string
-  value: string
-  icon: typeof IconDatabase
-}) {
-  return (
-    <Paper withBorder radius="lg" p="md">
-      <Group gap="sm" align="flex-start">
-        <ThemeIcon variant="light" color="cyan">
-          <Icon size={16} />
-        </ThemeIcon>
-        <div>
-          <Text size="xs" tt="uppercase" c="dimmed">
-            {label}
-          </Text>
-          <Text fw={600}>{value}</Text>
-        </div>
-      </Group>
-    </Paper>
+                    </Table.Td>
+                    <Table.Td>
+                      <ThemeIcon
+                        size="md"
+                        variant="light"
+                        color={child.kind === 'collection' ? 'blue' : 'teal'}
+                      >
+                        {child.kind === 'collection' ? (
+                          <IconFolder size={14} />
+                        ) : (
+                          <IconFile size={14} />
+                        )}
+                      </ThemeIcon>
+                    </Table.Td>
+                    <Table.Td>
+                      {isRenaming ? (
+                        <TextInput
+                          value={renameState.draftName}
+                          onChange={(event) => updateRenameDraft(event.currentTarget.value)}
+                          onClick={(event) => event.stopPropagation()}
+                          onKeyDown={(event) => {
+                            event.stopPropagation()
+                            if (event.key === 'Enter') {
+                              event.preventDefault()
+                              renamePathMutation.mutate()
+                            }
+                            if (event.key === 'Escape') {
+                              event.preventDefault()
+                              cancelRename()
+                            }
+                          }}
+                          autoFocus
+                        />
+                      ) : (
+                        <Anchor
+                          fw={600}
+                          underline="never"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            void openPath(child.path)
+                          }}
+                        >
+                          {child.path_segments.at(-1)?.display_name ?? displayName(child.path)}
+                        </Anchor>
+                      )}
+                    </Table.Td>
+                    <Table.Td>{child.kind === 'data_object' ? 'file' : 'folder'}</Table.Td>
+                    <Table.Td>{child.kind === 'data_object' ? (child.display_size ?? '—') : '—'}</Table.Td>
+                    <Table.Td>{formatDateTime(child.created_at)}</Table.Td>
+                    <Table.Td>{formatDateTime(child.updated_at)}</Table.Td>
+                    <Table.Td>
+                      <Group gap={4} wrap="nowrap">
+                        {isRenaming ? (
+                          <>
+                            <ActionIcon
+                              variant="subtle"
+                              color="teal"
+                              aria-label={`Save rename for ${displayName(child.path)}`}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                renamePathMutation.mutate()
+                              }}
+                              loading={renamePathMutation.isPending}
+                            >
+                              <IconCheck size={16} />
+                            </ActionIcon>
+                            <ActionIcon
+                              variant="subtle"
+                              color="gray"
+                              aria-label={`Cancel rename for ${displayName(child.path)}`}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                cancelRename()
+                              }}
+                            >
+                              <IconX size={16} />
+                            </ActionIcon>
+                          </>
+                        ) : (
+                          <ActionIcon
+                            variant="subtle"
+                            color="gray"
+                            aria-label={`Rename ${displayName(child.path)}`}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              beginRename(child)
+                            }}
+                          >
+                            <IconEdit size={16} />
+                          </ActionIcon>
+                        )}
+                        <ActionIcon
+                          variant="subtle"
+                          color="red"
+                          aria-label={`Delete ${displayName(child.path)}`}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            openDeleteDialog(child)
+                          }}
+                        >
+                          <IconTrash size={16} />
+                        </ActionIcon>
+                        <ActionIcon
+                          variant="subtle"
+                          color="gray"
+                          aria-label={`Open details for ${displayName(child.path)}`}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            openDetails(child.path)
+                          }}
+                        >
+                          <IconDots size={16} />
+                        </ActionIcon>
+                      </Group>
+                    </Table.Td>
+                  </Table.Tr>
+                    )
+                  })()
+                ))}
+                {!children.length && !childrenQuery.isLoading && !listingError ? (
+                  <Table.Tr>
+                    <Table.Td colSpan={8}>
+                      <Text size="sm" c="dimmed">
+                        Empty collection.
+                      </Text>
+                    </Table.Td>
+                  </Table.Tr>
+                ) : null}
+                {childrenQuery.isLoading ? (
+                  <Table.Tr>
+                    <Table.Td colSpan={8}>
+                      <Text size="sm" c="dimmed">
+                        Loading collection contents...
+                      </Text>
+                    </Table.Td>
+                  </Table.Tr>
+                ) : null}
+              </Table.Tbody>
+            </Table>
+          ) : null}
+        </Stack>
+      </Card>
+    </div>
   )
 }

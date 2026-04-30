@@ -6,27 +6,272 @@ export interface HealthResponse {
   description?: string
 }
 
-export interface ObjectRecord {
+export type ServiceInfoResponse = Record<string, unknown>
+
+export interface ParentLink {
+  irods_path: string
+  href: string
+}
+
+export interface PathSegmentLink {
+  display_name: string
+  irods_path: string
+  href: string
+}
+
+export interface ActionLink {
+  href: string
+  method?: string
+}
+
+export interface AVULinks {
+  update?: ActionLink
+  delete?: ActionLink
+}
+
+export interface PathACLItemLinks {
+  update?: ActionLink
+  remove?: ActionLink
+}
+
+export interface PathACLLinks {
+  path?: ActionLink
+  add_permission?: ActionLink
+  add_user?: ActionLink
+  set_inheritance?: ActionLink
+  delete_inheritance?: ActionLink
+}
+
+export interface PathCommandCue {
+  operation?: string
+  gocmd?: string
+  icommand?: string
+}
+
+export interface PathEntry {
   id: string
   path: string
-  checksum: string
-  size: number
+  kind: 'data_object' | 'collection'
   zone: string
+  cmd_cue?: PathCommandCue
+  mime_type?: string
+  display_size?: string
+  created_at?: string
+  updated_at?: string
+  parent?: ParentLink
+  links?: {
+    avus?: ActionLink
+    acls?: ActionLink
+    create_avu?: ActionLink
+    create_ticket?: ActionLink
+    resources?: ActionLink
+    create_child_collection?: ActionLink
+    create_child_data_object?: ActionLink
+  }
+  path_segments: PathSegmentLink[]
+  hasChildren?: boolean
+  childCount?: number
+  checksum?: PathChecksum
+  size?: number
   resource?: string
+  replicas?: PathReplica[]
   metadata?: Record<string, string>
 }
 
-export interface CollectionRecord {
+export interface PathReplica {
+  number: number
+  owner?: string
+  resource_name?: string
+  resource_hierarchy?: string
+  size?: number
+  display_size?: string
+  updated_at?: string
+  status?: string
+  status_symbol?: string
+  status_description?: string
+  checksum?: string
+  data_type?: string
+  physical_path?: string
+}
+
+export interface PathChildrenResponse {
+  irods_path: string
+  path_segments: PathSegmentLink[]
+  children: PathEntry[]
+}
+
+export interface AVUEntry {
   id: string
+  attrib: string
+  value: string
+  unit?: string
+  created_at?: string
+  updated_at?: string
+  links?: AVULinks
+}
+
+export interface PathAVUResponse {
+  irods_path: string
+  path_segments: PathSegmentLink[]
+  links?: {
+    avus?: ActionLink
+    create_avu?: ActionLink
+    create_ticket?: ActionLink
+    resources?: ActionLink
+  }
+  avus: AVUEntry[]
+  count?: number
+  total?: number
+  offset?: number
+  limit?: number
+}
+
+export interface PathACLEntry {
+  id: string
+  name: string
+  zone?: string
+  type: 'user' | 'group'
+  irods_user_type?: string
+  access_level: string
+  links?: PathACLItemLinks
+}
+
+export interface PathACLResponse {
+  irods_path: string
+  kind: 'data_object' | 'collection'
+  path_segments: PathSegmentLink[]
+  inheritance_enabled?: boolean
+  links?: PathACLLinks
+  users: PathACLEntry[]
+  groups: PathACLEntry[]
+}
+
+export interface PathChecksumResponse {
+  irods_path: string
+  path_segments: PathSegmentLink[]
+  checksum?: string
+  type?: string
+}
+
+export interface PathChecksum {
+  checksum?: string
+  type?: string
+}
+
+export interface TicketLinks {
+  self?: ActionLink
+  update?: ActionLink
+  delete?: ActionLink
+  path?: ActionLink
+  download?: ActionLink
+}
+
+export interface TicketEntry {
+  name: string
+  bearer_token?: string
+  type?: string
+  owner?: string
+  owner_zone?: string
+  object_type?: string
+  irods_path?: string
+  uses_limit?: number
+  uses_count?: number
+  write_file_limit?: number
+  write_file_count?: number
+  write_byte_limit?: number
+  write_byte_count?: number
+  expiration_time?: string
+  links?: TicketLinks
+}
+
+export interface TicketResponse {
+  ticket: TicketEntry
+}
+
+export interface TicketCollectionResponse {
+  tickets: TicketEntry[]
+  count?: number
+  links?: {
+    self?: ActionLink
+    create?: ActionLink
+  }
+}
+
+export interface ResourceRecord {
+  id: number
+  name: string
+  zone?: string
+  type?: string
+  class?: string
+  location?: string
+  path?: string
+  context?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface ResourceCollectionResponse {
+  resources: ResourceRecord[]
+  count: number
+  scope: 'top' | 'all'
+  links: {
+    self?: ActionLink
+  }
+}
+
+export interface UserLookupEntry {
+  id?: number
+  name: string
+  zone?: string
+  type?: string
+}
+
+export interface UserLookupResponse {
+  users: UserLookupEntry[]
+}
+
+export interface GroupLookupEntry {
+  id?: number
+  name: string
+  zone?: string
+  type?: string
+}
+
+export interface GroupLookupResponse {
+  groups: GroupLookupEntry[]
+}
+
+export interface PathContentsUploadResponse {
   path: string
-  zone: string
-  childCount?: number
-  metadata?: Record<string, string>
+  parent_path: string
+  file_name: string
+  action: 'created' | 'replaced'
+  size: number
+  checksum?: {
+    requested: boolean
+    verified: boolean
+    algorithm?: string
+    value?: string
+  }
+  links?: {
+    path?: ActionLink
+    contents?: ActionLink
+    parent?: ActionLink
+  }
 }
 
 export interface ApiErrorPayload {
   code: string
   message: string
+}
+
+export type AuthMode = 'basic' | 'oidc'
+
+export interface RequestAuth {
+  mode: AuthMode
+  username?: string
+  password?: string
+  token?: string
 }
 
 export class ApiError extends Error {
@@ -53,13 +298,85 @@ function buildUrl(path: string, baseUrl?: string) {
   return resolvedBaseUrl ? `${resolvedBaseUrl}${path}` : path
 }
 
-async function request<T>(path: string, token?: string, baseUrl?: string): Promise<T> {
-  const response = await fetch(buildUrl(path, baseUrl), {
-    headers: token
-      ? {
-          Authorization: `Bearer ${token}`,
-        }
-      : undefined,
+function buildAbsoluteUrl(path: string, baseUrl?: string) {
+  const resolvedBaseUrl = resolveBaseUrl(baseUrl)
+  if (resolvedBaseUrl) {
+    return `${resolvedBaseUrl}${path}`
+  }
+
+  if (typeof window !== 'undefined') {
+    return new URL(path, window.location.origin).toString()
+  }
+
+  return path
+}
+
+function encodeBasicCredentials(username: string, password: string) {
+  return btoa(`${username}:${password}`)
+}
+
+function buildHeaders(auth?: RequestAuth) {
+  if (!auth) {
+    return undefined
+  }
+
+  if (auth.mode === 'basic') {
+    return {
+      Authorization: `Basic ${encodeBasicCredentials(auth.username ?? '', auth.password ?? '')}`,
+    }
+  }
+
+  return auth.token
+    ? {
+        Authorization: `Bearer ${auth.token}`,
+      }
+    : undefined
+}
+
+function parseFilenameFromContentDisposition(value: string | null) {
+  if (!value) {
+    return undefined
+  }
+
+  const utf8Match = value.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1])
+    } catch {
+      return utf8Match[1]
+    }
+  }
+
+  const plainMatch = value.match(/filename="?([^";]+)"?/i)
+  return plainMatch?.[1]
+}
+
+function buildApiError(status: number, payload?: ApiErrorPayload | null) {
+  return new ApiError(
+    status,
+    payload?.message ?? `Request failed with status ${status}`,
+    payload?.code,
+  )
+}
+
+async function request<T>(
+  path: string,
+  options?: {
+    auth?: RequestAuth
+    baseUrl?: string
+    method?: string
+    body?: BodyInit
+    headers?: Record<string, string>
+  },
+): Promise<T> {
+  const headers = {
+    ...buildHeaders(options?.auth),
+    ...options?.headers,
+  }
+  const response = await fetch(buildUrl(path, options?.baseUrl), {
+    method: options?.method,
+    headers,
+    body: options?.body,
   })
 
   if (!response.ok) {
@@ -68,7 +385,596 @@ async function request<T>(path: string, token?: string, baseUrl?: string): Promi
     try {
       payload = (await response.json()) as ApiErrorPayload
     } catch {
-      payload = null
+      // Fall back to the HTTP status when the response body is not JSON.
+    }
+
+    throw buildApiError(response.status, payload)
+  }
+
+  return (await response.json()) as T
+}
+
+function withPath(path: string, options?: { verbose?: number }) {
+  const params = new URLSearchParams({
+    irods_path: path,
+  })
+
+  if (options?.verbose !== undefined) {
+    params.set('verbose', `${options.verbose}`)
+  }
+
+  return `?${params.toString()}`
+}
+
+export function getHealth(baseUrl?: string) {
+  return request<HealthResponse>('/healthz', { baseUrl })
+}
+
+export function getServiceInfo(auth: RequestAuth, baseUrl?: string) {
+  return request<ServiceInfoResponse>('/api/v1/server', {
+    auth,
+    baseUrl,
+  })
+}
+
+export function getResources(
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: { scope?: 'top' | 'all' },
+) {
+  const params = new URLSearchParams({
+    scope: options?.scope ?? 'top',
+  })
+
+  return request<ResourceCollectionResponse>(`/api/v1/resource?${params.toString()}`, {
+    auth,
+    baseUrl,
+  })
+}
+
+export function searchUsers(
+  prefix: string,
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: { zone?: string },
+) {
+  const params = new URLSearchParams({
+    prefix,
+  })
+
+  const zone = options?.zone?.trim()
+  if (zone) {
+    params.set('zone', zone)
+  }
+
+  return request<UserLookupResponse>(`/api/v1/user?${params.toString()}`, {
+    auth,
+    baseUrl,
+  })
+}
+
+export function searchGroups(
+  prefix: string,
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: { zone?: string },
+) {
+  const params = new URLSearchParams({
+    prefix,
+  })
+
+  const zone = options?.zone?.trim()
+  if (zone) {
+    params.set('zone', zone)
+  }
+
+  return request<GroupLookupResponse>(`/api/v1/usergroup?${params.toString()}`, {
+    auth,
+    baseUrl,
+  })
+}
+
+export function getPath(
+  irodsPath: string,
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: { verbose?: number },
+) {
+  return request<PathEntry>(`/api/v1/path${withPath(irodsPath, options)}`, {
+    auth,
+    baseUrl,
+  })
+}
+
+export function getPathChildren(
+  irodsPath: string,
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  return request<PathChildrenResponse>(`/api/v1/path/children${withPath(irodsPath)}`, {
+    auth,
+    baseUrl,
+  })
+}
+
+export function createPathChild(
+  parentPath: string,
+  payload: {
+    child_name: string
+    kind: 'collection' | 'data_object'
+    mkdirs?: boolean
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  return request<PathEntry>(`/api/v1/path${withPath(parentPath)}`, {
+    auth,
+    baseUrl,
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function deletePath(
+  irodsPath: string,
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: { force?: boolean },
+) {
+  const params = new URLSearchParams({
+    irods_path: irodsPath,
+  })
+
+  if (options?.force) {
+    params.set('force', 'true')
+  }
+
+  const response = await fetch(buildUrl(`/api/v1/path?${params.toString()}`, baseUrl), {
+    method: 'DELETE',
+    headers: buildHeaders(auth),
+  })
+
+  if (!response.ok) {
+    let payload: ApiErrorPayload | null = null
+
+    try {
+      payload = (await response.json()) as ApiErrorPayload
+    } catch {
+      // Fall back to the HTTP status when the response body is not JSON.
+    }
+
+    throw buildApiError(response.status, payload)
+  }
+}
+
+export function renamePath(
+  irodsPath: string,
+  payload: { new_name: string },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  return request<PathEntry>(`/api/v1/path${withPath(irodsPath)}`, {
+    auth,
+    baseUrl,
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function uploadPathContents(
+  payload: {
+    parent_path: string
+    file_name: string
+    content: File
+    checksum?: boolean
+    overwrite?: boolean
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: {
+    onProgress?: (progress: { loaded: number; total: number }) => void
+    signal?: AbortSignal
+  },
+) {
+  return new Promise<PathContentsUploadResponse>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    const formData = new FormData()
+
+    formData.set('parent_path', payload.parent_path)
+    formData.set('file_name', payload.file_name)
+    formData.set('content', payload.content)
+
+    if (payload.checksum !== undefined) {
+      formData.set('checksum', `${payload.checksum}`)
+    }
+
+    if (payload.overwrite !== undefined) {
+      formData.set('overwrite', `${payload.overwrite}`)
+    }
+
+    xhr.open('POST', buildUrl('/api/v1/path/contents', baseUrl))
+
+    const headers = buildHeaders(auth)
+    for (const [key, value] of Object.entries(headers ?? {})) {
+      xhr.setRequestHeader(key, value)
+    }
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        options?.onProgress?.({
+          loaded: event.loaded,
+          total: event.total,
+        })
+      }
+    }
+
+    xhr.onerror = () => {
+      reject(new ApiError(0, 'Upload failed because the network request could not be completed.'))
+    }
+
+    xhr.onabort = () => {
+      reject(new ApiError(0, 'Upload was cancelled.'))
+    }
+
+    xhr.onload = () => {
+      const responseText = xhr.responseText?.trim() ?? ''
+      let parsedPayload: unknown = null
+
+      if (responseText) {
+        try {
+          parsedPayload = JSON.parse(responseText)
+        } catch {
+          parsedPayload = null
+        }
+      }
+
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(parsedPayload as PathContentsUploadResponse)
+        return
+      }
+
+      reject(buildApiError(xhr.status, (parsedPayload as ApiErrorPayload | null) ?? null))
+    }
+
+    if (options?.signal) {
+      if (options.signal.aborted) {
+        xhr.abort()
+        return
+      }
+
+      options.signal.addEventListener('abort', () => xhr.abort(), { once: true })
+    }
+
+    xhr.send(formData)
+  })
+}
+
+export function getPathAVUs(irodsPath: string, auth: RequestAuth, baseUrl?: string) {
+  return request<PathAVUResponse>(`/api/v1/path/avu${withPath(irodsPath)}`, {
+    auth,
+    baseUrl,
+  })
+}
+
+export function getPathACL(irodsPath: string, auth: RequestAuth, baseUrl?: string) {
+  return request<PathACLResponse>(`/api/v1/path/acl${withPath(irodsPath)}`, {
+    auth,
+    baseUrl,
+  })
+}
+
+export function computePathChecksum(irodsPath: string, auth: RequestAuth, baseUrl?: string) {
+  return request<PathChecksumResponse>(`/api/v1/path/checksum${withPath(irodsPath)}`, {
+    auth,
+    baseUrl,
+    method: 'POST',
+  })
+}
+
+export async function downloadPath(
+  irodsPath: string,
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  const response = await fetch(buildUrl(`/api/v1/path/contents${withPath(irodsPath)}`, baseUrl), {
+    headers: buildHeaders(auth),
+  })
+
+  if (!response.ok) {
+    let payload: ApiErrorPayload | null = null
+
+    try {
+      payload = (await response.json()) as ApiErrorPayload
+    } catch {
+      // Fall back to the HTTP status when the response body is not JSON.
+    }
+
+    throw buildApiError(response.status, payload)
+  }
+
+  return {
+    blob: await response.blob(),
+    filename: parseFilenameFromContentDisposition(response.headers.get('Content-Disposition')),
+  }
+}
+
+export function updateAVU(
+  action: ActionLink,
+  payload: { attrib: string; value: string; unit?: string },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  return request<{ avu?: AVUEntry }>(action.href, {
+    auth,
+    baseUrl,
+    method: action.method ?? 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function deleteAVU(action: ActionLink, auth: RequestAuth, baseUrl?: string) {
+  const response = await fetch(buildUrl(action.href, baseUrl), {
+    method: action.method ?? 'DELETE',
+    headers: buildHeaders(auth),
+  })
+
+  if (!response.ok) {
+    let payload: ApiErrorPayload | null = null
+
+    try {
+      payload = (await response.json()) as ApiErrorPayload
+    } catch {
+      // Fall back to the HTTP status when the response body is not JSON.
+    }
+
+    throw buildApiError(response.status, payload)
+  }
+}
+
+export function addAVU(
+  action: ActionLink,
+  payload: { attrib: string; value: string; unit?: string },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  return request<{ avu?: AVUEntry }>(action.href, {
+    auth,
+    baseUrl,
+    method: action.method ?? 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function addPathACL(
+  action: ActionLink,
+  payload: {
+    name: string
+    type?: 'user' | 'group'
+    zone?: string
+    access_level: string
+    recursive?: boolean
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  return request<{ acl?: PathACLEntry }>(action.href, {
+    auth,
+    baseUrl,
+    method: action.method ?? 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updatePathACL(
+  action: ActionLink,
+  payload: {
+    access_level: string
+    recursive?: boolean
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  return request<{ acl?: PathACLEntry }>(action.href, {
+    auth,
+    baseUrl,
+    method: action.method ?? 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function deletePathACL(action: ActionLink, auth: RequestAuth, baseUrl?: string) {
+  const response = await fetch(buildUrl(action.href, baseUrl), {
+    method: action.method ?? 'DELETE',
+    headers: buildHeaders(auth),
+  })
+
+  if (!response.ok) {
+    let payload: ApiErrorPayload | null = null
+
+    try {
+      payload = (await response.json()) as ApiErrorPayload
+    } catch {
+      // Fall back to the HTTP status when the response body is not JSON.
+    }
+
+    throw buildApiError(response.status, payload)
+  }
+}
+
+export async function invokeActionLink(
+  action: ActionLink,
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: {
+    method?: string
+    body?: BodyInit
+    headers?: Record<string, string>
+  },
+) {
+  const response = await fetch(buildUrl(action.href, baseUrl), {
+    method: options?.method ?? action.method ?? 'POST',
+    headers: {
+      ...buildHeaders(auth),
+      ...options?.headers,
+    },
+    body: options?.body,
+  })
+
+  if (!response.ok) {
+    let payload: ApiErrorPayload | null = null
+
+    try {
+      payload = (await response.json()) as ApiErrorPayload
+    } catch {
+      // Fall back to the HTTP status when the response body is not JSON.
+    }
+
+    throw buildApiError(response.status, payload)
+  }
+}
+
+export async function setPathACLInheritance(
+  action: ActionLink,
+  payload: {
+    enabled: boolean
+    recursive?: boolean
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  const response = await fetch(buildUrl(action.href, baseUrl), {
+    method: action.method ?? 'PUT',
+    headers: {
+      ...buildHeaders(auth),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+
+  if (!response.ok) {
+    let payload: ApiErrorPayload | null = null
+
+    try {
+      payload = (await response.json()) as ApiErrorPayload
+    } catch {
+      // Fall back to the HTTP status when the response body is not JSON.
+    }
+
+    throw buildApiError(response.status, payload)
+  }
+}
+
+export async function deletePathACLInheritance(
+  action: ActionLink,
+  options: {
+    recursive?: boolean
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  const href = new URL(buildAbsoluteUrl(action.href, baseUrl))
+  if (options.recursive) {
+    href.searchParams.set('recursive', 'true')
+  }
+
+  const response = await fetch(href.toString(), {
+    method: action.method ?? 'DELETE',
+    headers: buildHeaders(auth),
+  })
+
+  if (!response.ok) {
+    let payload: ApiErrorPayload | null = null
+
+    try {
+      payload = (await response.json()) as ApiErrorPayload
+    } catch {
+      // Fall back to the HTTP status when the response body is not JSON.
+    }
+
+    throw buildApiError(response.status, payload)
+  }
+}
+
+export function downloadPathUrl(irodsPath: string, baseUrl?: string) {
+  return buildAbsoluteUrl(`/api/v1/path/contents${withPath(irodsPath)}`, baseUrl)
+}
+
+export function actionLinkUrl(action: ActionLink, baseUrl?: string) {
+  return buildAbsoluteUrl(action.href, baseUrl)
+}
+
+export function getTickets(auth: RequestAuth, baseUrl?: string) {
+  return request<TicketCollectionResponse>('/api/v1/ticket', {
+    auth,
+    baseUrl,
+  })
+}
+
+export function createPathTicket(
+  action: ActionLink,
+  payload: { maximum_uses?: number; lifetime_minutes?: number },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  return request<TicketResponse>(action.href, {
+    auth,
+    baseUrl,
+    method: action.method ?? 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateTicket(
+  action: ActionLink,
+  payload: { maximum_uses?: number; lifetime_minutes?: number },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  return request<TicketResponse>(action.href, {
+    auth,
+    baseUrl,
+    method: action.method ?? 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function deleteTicket(action: ActionLink, auth: RequestAuth, baseUrl?: string) {
+  const response = await fetch(buildUrl(action.href, baseUrl), {
+    method: action.method ?? 'DELETE',
+    headers: buildHeaders(auth),
+  })
+
+  if (!response.ok) {
+    let payload: ApiErrorPayload | null = null
+
+    try {
+      payload = (await response.json()) as ApiErrorPayload
+    } catch {
+      // Fall back to the HTTP status when the response body is not JSON.
     }
 
     throw new ApiError(
@@ -77,30 +983,4 @@ async function request<T>(path: string, token?: string, baseUrl?: string): Promi
       payload?.code,
     )
   }
-
-  return (await response.json()) as T
-}
-
-export function getHealth(baseUrl?: string) {
-  return request<HealthResponse>('/healthz', undefined, baseUrl)
-}
-
-export function getObject(objectId: string, token: string, baseUrl?: string) {
-  return request<ObjectRecord>(
-    `/api/v1/objects/${encodeURIComponent(objectId)}`,
-    token,
-    baseUrl,
-  )
-}
-
-export function getCollection(
-  collectionId: string,
-  token: string,
-  baseUrl?: string,
-) {
-  return request<CollectionRecord>(
-    `/api/v1/collections/${encodeURIComponent(collectionId)}`,
-    token,
-    baseUrl,
-  )
 }
