@@ -60,6 +60,15 @@ export interface PathEntry {
   updated_at?: string
   parent?: ParentLink
   links?: {
+    self?: ActionLink
+    details?: ActionLink
+    parent?: ActionLink
+    children?: ActionLink
+    update?: ActionLink
+    delete?: ActionLink
+    relocate?: ActionLink
+    move?: ActionLink
+    copy?: ActionLink
     avus?: ActionLink
     acls?: ActionLink
     create_avu?: ActionLink
@@ -67,6 +76,9 @@ export interface PathEntry {
     resources?: ActionLink
     create_child_collection?: ActionLink
     create_child_data_object?: ActionLink
+    upload_contents?: ActionLink
+    replace_contents?: ActionLink
+    download_contents?: ActionLink
   }
   path_segments: PathSegmentLink[]
   hasChildren?: boolean
@@ -98,6 +110,15 @@ export interface PathChildrenResponse {
   irods_path: string
   path_segments: PathSegmentLink[]
   children: PathEntry[]
+  links?: {
+    self?: ActionLink
+    parent?: ActionLink
+    next?: ActionLink
+    prev?: ActionLink
+    create_child_collection?: ActionLink
+    create_child_data_object?: ActionLink
+    upload_contents?: ActionLink
+  }
   search?: {
     name_pattern?: string
     recursive?: boolean
@@ -111,6 +132,12 @@ export interface PathReplicasResponse {
   irods_path: string
   path_segments: PathSegmentLink[]
   replicas: PathReplica[]
+  links?: {
+    self?: ActionLink
+    add_replica?: ActionLink
+    move_replica?: ActionLink
+    trim_replica?: ActionLink
+  }
 }
 
 export interface AVUEntry {
@@ -299,6 +326,19 @@ export class ApiError extends Error {
   }
 }
 
+function requireAbsolutePath(path: string, fieldName: string) {
+  const normalized = path.trim()
+  if (!normalized) {
+    throw new ApiError(400, `${fieldName} is required.`)
+  }
+
+  if (!normalized.startsWith('/')) {
+    throw new ApiError(400, `${fieldName} must be an absolute path.`)
+  }
+
+  return normalized
+}
+
 const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? ''
 
 function resolveBaseUrl(baseUrl?: string) {
@@ -409,7 +449,7 @@ async function request<T>(
 
 function withPath(path: string, options?: { verbose?: number }) {
   const params = new URLSearchParams({
-    irods_path: path,
+    irods_path: requireAbsolutePath(path, 'irods_path'),
   })
 
   if (options?.verbose !== undefined) {
@@ -515,7 +555,7 @@ export function getPathChildren(
   },
 ) {
   const params = new URLSearchParams({
-    irods_path: irodsPath,
+    irods_path: requireAbsolutePath(irodsPath, 'irods_path'),
   })
 
   const namePattern = options?.name_pattern?.trim()
@@ -585,7 +625,7 @@ export async function deletePath(
   options?: { force?: boolean },
 ) {
   const params = new URLSearchParams({
-    irods_path: irodsPath,
+    irods_path: requireAbsolutePath(irodsPath, 'irods_path'),
   })
 
   if (options?.force) {
@@ -627,6 +667,119 @@ export function renamePath(
   })
 }
 
+export function relocatePath(
+  irodsPath: string,
+  payload: {
+    operation: 'move' | 'copy'
+    destination_path: string
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  return request<PathEntry>(`/api/v1/path${withPath(irodsPath)}`, {
+    auth,
+    baseUrl,
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      operation: payload.operation,
+      destination_path: requireAbsolutePath(payload.destination_path, 'destination_path'),
+    }),
+  })
+}
+
+export function createPathChildFromAction(
+  action: ActionLink,
+  payload: {
+    child_name: string
+    kind: 'collection' | 'data_object'
+    mkdirs?: boolean
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  return request<PathEntry>(action.href, {
+    auth,
+    baseUrl,
+    method: action.method ?? 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function renamePathByAction(
+  action: ActionLink,
+  payload: { new_name: string },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  return request<PathEntry>(action.href, {
+    auth,
+    baseUrl,
+    method: action.method ?? 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function relocatePathByAction(
+  action: ActionLink,
+  payload: {
+    operation: 'move' | 'copy'
+    destination_path: string
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  return request<PathEntry>(action.href, {
+    auth,
+    baseUrl,
+    method: action.method ?? 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      operation: payload.operation,
+      destination_path: requireAbsolutePath(payload.destination_path, 'destination_path'),
+    }),
+  })
+}
+
+export async function deletePathByAction(
+  action: ActionLink,
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: { force?: boolean },
+) {
+  const href = new URL(buildAbsoluteUrl(action.href, baseUrl))
+  if (options?.force) {
+    href.searchParams.set('force', 'true')
+  }
+
+  const response = await fetch(href.toString(), {
+    method: action.method ?? 'DELETE',
+    headers: buildHeaders(auth),
+  })
+
+  if (!response.ok) {
+    let payload: ApiErrorPayload | null = null
+
+    try {
+      payload = (await response.json()) as ApiErrorPayload
+    } catch {
+      // Fall back to the HTTP status when the response body is not JSON.
+    }
+
+    throw buildApiError(response.status, payload)
+  }
+}
+
 export function uploadPathContents(
   payload: {
     parent_path: string
@@ -646,7 +799,7 @@ export function uploadPathContents(
     const xhr = new XMLHttpRequest()
     const formData = new FormData()
 
-    formData.set('parent_path', payload.parent_path)
+    formData.set('parent_path', requireAbsolutePath(payload.parent_path, 'parent_path'))
     formData.set('file_name', payload.file_name)
     formData.set('content', payload.content)
 

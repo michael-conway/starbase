@@ -28,6 +28,7 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   IconAlertCircle,
   IconCheck,
+  IconCopy,
   IconDots,
   IconDatabase,
   IconEdit,
@@ -42,7 +43,21 @@ import {
   IconX,
 } from '@tabler/icons-react'
 import { displayName, formatDateTime, homePathForUser } from '../features/explorer'
-import { ApiError, createPathChild, deletePath, getPath, getPathChildren, renamePath, type PathEntry } from '../lib/irods-rest'
+import {
+  ApiError,
+  createPathChild,
+  createPathChildFromAction,
+  deletePath,
+  deletePathByAction,
+  getPath,
+  getPathChildren,
+  relocatePath,
+  relocatePathByAction,
+  renamePath,
+  renamePathByAction,
+  type ActionLink,
+  type PathEntry,
+} from '../lib/irods-rest'
 import { useSession } from '../providers/use-session'
 import { useUploadManager } from '../providers/upload-context'
 
@@ -52,12 +67,22 @@ interface DeleteDialogState {
   path: string
   label: string
   kind: PathEntry['kind']
+  action?: ActionLink
 }
 
 interface RenameState {
   path: string
   draftName: string
   kind: PathEntry['kind']
+  action?: ActionLink
+}
+
+type RelocateOperation = 'move' | 'copy'
+
+interface RelocateDialogState {
+  operation: RelocateOperation
+  browsePath: string
+  destinationPathDraft: string
 }
 
 type SearchScope = 'children' | 'subtree' | 'absolute'
@@ -135,6 +160,43 @@ function parseSearchOffset(value: string | null): number {
   return Math.max(0, parsed)
 }
 
+function normalizeCollectionPath(path: string) {
+  const trimmed = path.trim()
+  if (!trimmed) {
+    return ''
+  }
+
+  if (!trimmed.startsWith('/')) {
+    return ''
+  }
+
+  if (trimmed === '/') {
+    return '/'
+  }
+
+  return trimmed.replace(/\/+$/, '')
+}
+
+function destinationPathForChild(destinationCollectionPath: string, childPath: string) {
+  const baseName = displayName(childPath)
+  const normalizedDestination = normalizeCollectionPath(destinationCollectionPath)
+  if (!normalizedDestination || !baseName) {
+    return ''
+  }
+
+  return normalizedDestination === '/'
+    ? `/${baseName}`
+    : `${normalizedDestination}/${baseName}`
+}
+
+function relocateActionForEntry(entry: PathEntry, operation: RelocateOperation): ActionLink | undefined {
+  if (operation === 'move') {
+    return entry.links?.move ?? entry.links?.relocate ?? entry.links?.update
+  }
+
+  return entry.links?.copy ?? entry.links?.relocate ?? entry.links?.update
+}
+
 function quickLocations(path: string, username?: string) {
   const segments = path.split('/').filter(Boolean)
   const zoneRoot = segments[0] ? `/${segments[0]}` : '/tempZone'
@@ -206,6 +268,7 @@ export function ExplorerPage() {
   const [deleteDialog, setDeleteDialog] = useState<DeleteDialogState | null>(null)
   const [deleteForce, setDeleteForce] = useState(false)
   const [renameState, setRenameState] = useState<RenameState | null>(null)
+  const [relocateDialog, setRelocateDialog] = useState<RelocateDialogState | null>(null)
   const [dropTargetPath, setDropTargetPath] = useState<string | null>(null)
   const { requestFilesUpload, openFilePicker } = useUploadManager()
   const selectedPath = initialPath
@@ -361,6 +424,20 @@ export function ExplorerPage() {
       entryQuery.data?.kind === 'collection' && entryQuery.data.path === selectedPath,
   })
 
+  const relocateBrowsePath = relocateDialog?.browsePath ?? ''
+  const relocateBrowserEntryQuery = useQuery({
+    queryKey: ['path-entry-relocate-dialog', relocateBrowsePath, connection],
+    queryFn: () => getPath(relocateBrowsePath, connection.auth, connection.baseUrl),
+    enabled: Boolean(relocateDialog && relocateBrowsePath),
+  })
+  const relocateBrowserChildrenQuery = useQuery({
+    queryKey: ['path-children-relocate-dialog', relocateBrowsePath, connection],
+    queryFn: () => getPathChildren(relocateBrowsePath, connection.auth, connection.baseUrl),
+    enabled:
+      relocateBrowserEntryQuery.data?.kind === 'collection' &&
+      relocateBrowserEntryQuery.data.path === relocateBrowsePath,
+  })
+
   const refreshMutation = useMutation({
     mutationFn: async () => {
       const entry = await getPath(selectedPath, connection.auth, connection.baseUrl)
@@ -403,13 +480,24 @@ export function ExplorerPage() {
         throw new ApiError(400, 'Enter a name for the new item.')
       }
 
+      const payload = {
+        child_name: childName,
+        kind: createKind,
+        mkdirs: createKind === 'collection' ? createIntermediateCollections : undefined,
+      } as const
+
+      const action =
+        createKind === 'collection'
+          ? (childrenResponse?.links?.create_child_collection ?? entry.links?.create_child_collection)
+          : (childrenResponse?.links?.create_child_data_object ?? entry.links?.create_child_data_object)
+
+      if (action) {
+        return createPathChildFromAction(action, payload, connection.auth, connection.baseUrl)
+      }
+
       return createPathChild(
         entry.path,
-        {
-          child_name: childName,
-          kind: createKind,
-          mkdirs: createKind === 'collection' ? createIntermediateCollections : undefined,
-        },
+        payload,
         connection.auth,
         connection.baseUrl,
       )
@@ -439,9 +527,15 @@ export function ExplorerPage() {
         throw new ApiError(400, 'No delete target was selected.')
       }
 
-      await deletePath(deleteDialog.path, connection.auth, connection.baseUrl, {
-        force: deleteForce,
-      })
+      if (deleteDialog.action) {
+        await deletePathByAction(deleteDialog.action, connection.auth, connection.baseUrl, {
+          force: deleteForce,
+        })
+      } else {
+        await deletePath(deleteDialog.path, connection.auth, connection.baseUrl, {
+          force: deleteForce,
+        })
+      }
 
       return deleteDialog
     },
@@ -486,11 +580,16 @@ export function ExplorerPage() {
         throw new ApiError(400, 'Enter a new name.')
       }
 
+      const payload = {
+        new_name: newName,
+      }
+      if (renameState.action) {
+        return renamePathByAction(renameState.action, payload, connection.auth, connection.baseUrl)
+      }
+
       return renamePath(
         renameState.path,
-        {
-          new_name: newName,
-        },
+        payload,
         connection.auth,
         connection.baseUrl,
       )
@@ -516,11 +615,103 @@ export function ExplorerPage() {
       })
     },
   })
+  const relocatePathMutation = useMutation({
+    mutationFn: async (input: {
+      operation: RelocateOperation
+      destinationCollectionPath: string
+      sourceEntries: Array<Pick<PathEntry, 'path' | 'links'>>
+    }) => {
+      const destinationCollectionPath = normalizeCollectionPath(input.destinationCollectionPath)
+      if (!destinationCollectionPath) {
+        throw new ApiError(400, 'Destination path must be an absolute collection path.')
+      }
+
+      const failures: Array<{ source: string; reason: string }> = []
+      let successCount = 0
+
+      for (const sourceEntry of input.sourceEntries) {
+        const sourcePath = sourceEntry.path
+        const destinationPath = destinationPathForChild(destinationCollectionPath, sourcePath)
+        if (!destinationPath) {
+          failures.push({
+            source: sourcePath,
+            reason: 'Unable to derive destination path.',
+          })
+          continue
+        }
+
+        try {
+          const action = relocateActionForEntry(sourceEntry as PathEntry, input.operation)
+          if (action) {
+            await relocatePathByAction(
+              action,
+              {
+                operation: input.operation,
+                destination_path: destinationPath,
+              },
+              connection.auth,
+              connection.baseUrl,
+            )
+          } else {
+            await relocatePath(
+              sourcePath,
+              {
+                operation: input.operation,
+                destination_path: destinationPath,
+              },
+              connection.auth,
+              connection.baseUrl,
+            )
+          }
+          successCount += 1
+        } catch (error) {
+          failures.push({
+            source: sourcePath,
+            reason: error instanceof Error ? error.message : 'Unknown error',
+          })
+        }
+      }
+
+      return {
+        successCount,
+        failureCount: failures.length,
+        failures,
+      }
+    },
+    onSuccess: (result, variables) => {
+      const operationLabel = variables.operation === 'move' ? 'Move' : 'Copy'
+      if (result.failureCount === 0) {
+        notifications.show({
+          title: `${operationLabel} complete`,
+          message: `${result.successCount} item${result.successCount === 1 ? '' : 's'} processed.`,
+          color: 'teal',
+        })
+        setRelocateDialog(null)
+        setSelectedChildren([])
+      } else {
+        notifications.show({
+          title: `${operationLabel} completed with errors`,
+          message: `${result.successCount} succeeded, ${result.failureCount} failed.`,
+          color: 'yellow',
+        })
+      }
+      void entryQuery.refetch()
+      void childrenQuery.refetch()
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'Relocate failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
 
   const entry = entryQuery.data
   const childrenResponse =
     childrenQuery.data?.irods_path === selectedPath ? childrenQuery.data : undefined
   const children = childrenResponse?.children ?? []
+  const selectedChildEntries = children.filter((child) => selectedChildren.includes(child.path))
   const breadcrumbs = childrenResponse?.path_segments ?? entry?.path_segments ?? []
   const locationOptions = quickLocations(selectedPath, basicUsername)
   const listingError = childrenQuery.isError ? listingErrorDetails(childrenQuery.error) : null
@@ -537,6 +728,17 @@ export function ExplorerPage() {
     searchActive && (matchedCount !== undefined
       ? searchOffset + searchLimit < matchedCount
       : shownCount >= searchLimit)
+  const relocateBrowserChildren =
+    relocateBrowserChildrenQuery.data?.irods_path === relocateBrowsePath
+      ? (relocateBrowserChildrenQuery.data.children ?? []).filter((child) => child.kind === 'collection')
+      : []
+  const relocateBrowserBreadcrumbs =
+    relocateBrowserChildrenQuery.data?.path_segments ??
+    relocateBrowserEntryQuery.data?.path_segments ??
+    []
+  const relocateDestinationPath = normalizeCollectionPath(
+    relocateDialog?.destinationPathDraft ?? '',
+  )
 
   const applySearch = () => {
     const normalizedPattern = searchPatternDraft.trim()
@@ -603,6 +805,79 @@ export function ExplorerPage() {
     })
   }
 
+  const openRelocateDialog = (operation: RelocateOperation) => {
+    if (!selectedChildEntries.length) {
+      notifications.show({
+        title: 'No items selected',
+        message: 'Select one or more rows to move or copy.',
+        color: 'yellow',
+      })
+      return
+    }
+
+    setRelocateDialog({
+      operation,
+      browsePath: selectedPath,
+      destinationPathDraft: selectedPath,
+    })
+  }
+
+  const browseRelocatePath = (nextPath: string) => {
+    const normalized = normalizeCollectionPath(nextPath)
+    if (!normalized) {
+      notifications.show({
+        title: 'Invalid path',
+        message: 'Destination path must be absolute.',
+        color: 'red',
+      })
+      return
+    }
+
+    setRelocateDialog((current) =>
+      current
+        ? {
+            ...current,
+            browsePath: normalized,
+            destinationPathDraft: normalized,
+          }
+        : current,
+    )
+  }
+
+  const submitRelocate = () => {
+    if (!relocateDialog) {
+      return
+    }
+
+    const destinationCollectionPath = normalizeCollectionPath(relocateDialog.destinationPathDraft)
+    if (!destinationCollectionPath) {
+      notifications.show({
+        title: 'Destination is invalid',
+        message: 'Enter an absolute destination collection path.',
+        color: 'red',
+      })
+      return
+    }
+
+    if (!selectedChildEntries.length) {
+      notifications.show({
+        title: 'No items selected',
+        message: 'Select one or more rows to move or copy.',
+        color: 'yellow',
+      })
+      return
+    }
+
+    relocatePathMutation.mutate({
+      operation: relocateDialog.operation,
+      destinationCollectionPath,
+      sourceEntries: selectedChildEntries.map((item) => ({
+        path: item.path,
+        links: item.links,
+      })),
+    })
+  }
+
   const toggleChildSelection = (childPath: string) => {
     setSelectedChildren((current) =>
       current.includes(childPath)
@@ -628,6 +903,7 @@ export function ExplorerPage() {
       path: child.path,
       label: childLabel,
       kind: child.kind,
+      action: child.links?.delete,
     })
     setDeleteForce(requiresForce)
   }
@@ -651,6 +927,7 @@ export function ExplorerPage() {
       path: child.path,
       draftName: child.path_segments.at(-1)?.display_name ?? displayName(child.path),
       kind: child.kind,
+      action: child.links?.update,
     })
   }
 
@@ -776,6 +1053,140 @@ export function ExplorerPage() {
         </Stack>
       </Modal>
 
+      <Modal
+        opened={relocateDialog !== null}
+        onClose={() => {
+          if (!relocatePathMutation.isPending) {
+            setRelocateDialog(null)
+          }
+        }}
+        title={relocateDialog?.operation === 'copy' ? 'Copy selected items' : 'Move selected items'}
+        centered
+        size="lg"
+      >
+        <Stack gap="md">
+          <Text size="sm">
+            {selectedChildEntries.length} selected item{selectedChildEntries.length === 1 ? '' : 's'}
+          </Text>
+
+          <Stack gap={4}>
+            {selectedChildEntries.map((item) => (
+              <Text key={item.path} size="xs" c="dimmed" className="explorer-hover-path">
+                {item.path}
+              </Text>
+            ))}
+          </Stack>
+
+          <TextInput
+            label="Destination collection path"
+            value={relocateDialog?.destinationPathDraft ?? ''}
+            onChange={(event) =>
+              setRelocateDialog((current) =>
+                current
+                  ? {
+                      ...current,
+                      destinationPathDraft: event.currentTarget.value,
+                    }
+                  : current,
+              )
+            }
+            placeholder="/tempZone/home/user/target"
+          />
+
+          <Group gap="xs">
+            <Button
+              variant="light"
+              onClick={() => browseRelocatePath(relocateDialog?.destinationPathDraft ?? '')}
+              disabled={relocatePathMutation.isPending}
+            >
+              Browse destination
+            </Button>
+            <Text size="sm" c="dimmed" className="explorer-hover-path">
+              {relocateDestinationPath || 'No destination selected'}
+            </Text>
+          </Group>
+
+          <Breadcrumbs>
+            {relocateBrowserBreadcrumbs.map((crumb) => (
+              <Button
+                key={`relocate-${crumb.irods_path}`}
+                variant="subtle"
+                size="xs"
+                onClick={() => browseRelocatePath(crumb.irods_path)}
+              >
+                {crumb.display_name}
+              </Button>
+            ))}
+          </Breadcrumbs>
+
+          {relocateBrowserEntryQuery.isLoading || relocateBrowserChildrenQuery.isLoading ? (
+            <Group justify="center" py="sm">
+              <Loader size="sm" />
+            </Group>
+          ) : null}
+
+          {relocateBrowserEntryQuery.isError ? (
+            <Alert color="red" variant="light" title="Unable to open destination path">
+              {relocateBrowserEntryQuery.error.message}
+            </Alert>
+          ) : null}
+
+          {relocateBrowserEntryQuery.data && relocateBrowserEntryQuery.data.kind !== 'collection' ? (
+            <Alert color="yellow" variant="light" title="Destination is not a collection">
+              Choose a collection path for move/copy destination.
+            </Alert>
+          ) : null}
+
+          {relocateBrowserChildren.length ? (
+            <Table highlightOnHover verticalSpacing="xs">
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Folder</Table.Th>
+                  <Table.Th w={120}></Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {relocateBrowserChildren.map((child) => (
+                  <Table.Tr key={`relocate-child-${child.path}`}>
+                    <Table.Td>
+                      <Text size="sm">
+                        {child.path_segments.at(-1)?.display_name ?? displayName(child.path)}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Button
+                        size="xs"
+                        variant="light"
+                        onClick={() => browseRelocatePath(child.path)}
+                      >
+                        Open
+                      </Button>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          ) : null}
+
+          <Group justify="flex-end">
+            <Button
+              variant="default"
+              onClick={() => setRelocateDialog(null)}
+              disabled={relocatePathMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={submitRelocate}
+              loading={relocatePathMutation.isPending}
+              disabled={!relocateDestinationPath || selectedChildEntries.length === 0}
+            >
+              {relocateDialog?.operation === 'copy' ? 'Copy selected' : 'Move selected'}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
       <Card shadow="sm" radius="xl" padding="lg" className="explorer-sidebar">
         <Stack gap="lg">
           <div>
@@ -862,6 +1273,31 @@ export function ExplorerPage() {
           </Breadcrumbs>
 
           <div className="explorer-controls-panel">
+            {selectedChildEntries.length > 0 ? (
+              <Group justify="space-between" align="center" wrap="wrap">
+                <Group gap="xs">
+                  <Badge variant="light" color="blue">
+                    {selectedChildEntries.length} selected
+                  </Badge>
+                </Group>
+                <Group gap="xs">
+                  <Button
+                    variant="default"
+                    onClick={() => openRelocateDialog('move')}
+                  >
+                    Move selected
+                  </Button>
+                  <Button
+                    variant="light"
+                    leftSection={<IconCopy size={14} />}
+                    onClick={() => openRelocateDialog('copy')}
+                  >
+                    Copy selected
+                  </Button>
+                </Group>
+              </Group>
+            ) : null}
+
             <div className="explorer-search-panel">
               <Stack gap="sm">
               <Group align="flex-end" wrap="wrap">
