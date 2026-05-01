@@ -19,7 +19,7 @@ import {
   Title,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { IconAlertCircle, IconArrowLeft, IconDeviceFloppy, IconRestore, IconUpload } from '@tabler/icons-react'
+import { IconAlertCircle, IconArrowLeft, IconDeviceFloppy, IconRestore } from '@tabler/icons-react'
 import { FilePreviewGlyph } from '../features/file-preview-icon'
 import {
   filePreviewSpec,
@@ -30,7 +30,7 @@ import {
 } from '../features/file-preview'
 import { displayName } from '../features/explorer'
 import { downloadPath, getPath, uploadPathContents } from '../lib/irods-rest'
-import { useSession } from '../providers/session'
+import { useSession } from '../providers/use-session'
 
 function cloneRows(rows: string[][]) {
   return rows.map((row) => [...row])
@@ -88,7 +88,6 @@ export function ExplorerPreviewPage() {
   const [searchParams] = useSearchParams()
   const { connection } = useSession()
   const irodsPath = searchParams.get('irods_path')?.trim() ?? ''
-  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null)
   const [textValue, setTextValue] = useState('')
   const [originalTextValue, setOriginalTextValue] = useState('')
   const [tableRows, setTableRows] = useState<string[][]>([['']])
@@ -115,6 +114,13 @@ export function ExplorerPreviewPage() {
     queryFn: () => downloadPath(irodsPath, connection.auth, connection.baseUrl),
     enabled: Boolean(irodsPath && detailsQuery.data?.kind === 'data_object' && previewSpec?.canOpenPreview),
   })
+  const imagePreviewUrl = useMemo(() => {
+    if (previewSpec?.kind !== 'image' || !contentQuery.data?.blob) {
+      return null
+    }
+
+    return URL.createObjectURL(contentQuery.data.blob)
+  }, [contentQuery.data, previewSpec?.kind])
 
   const saveMutation = useMutation({
     mutationFn: async (payload: { content: string }) => {
@@ -156,31 +162,12 @@ export function ExplorerPreviewPage() {
   })
 
   useEffect(() => {
-    setImagePreviewUrl((current) => {
-      if (current) {
-        URL.revokeObjectURL(current)
-      }
-      return null
-    })
-  }, [irodsPath])
-
-  useEffect(() => {
-    if (previewSpec?.kind !== 'image' || !contentQuery.data?.blob) {
+    if (!imagePreviewUrl) {
       return undefined
     }
 
-    const objectUrl = URL.createObjectURL(contentQuery.data.blob)
-    setImagePreviewUrl((current) => {
-      if (current) {
-        URL.revokeObjectURL(current)
-      }
-      return objectUrl
-    })
-
-    return () => {
-      URL.revokeObjectURL(objectUrl)
-    }
-  }, [contentQuery.data?.blob, previewSpec?.kind])
+    return () => URL.revokeObjectURL(imagePreviewUrl)
+  }, [imagePreviewUrl])
 
   useEffect(() => {
     const spec = previewSpec
@@ -189,14 +176,18 @@ export function ExplorerPreviewPage() {
     }
 
     if (!['text', 'json', 'yaml', 'csv', 'tsv', 'log'].includes(spec.kind)) {
-      setDecodedContentReady(true)
-      setDecodedContentError(null)
+      queueMicrotask(() => {
+        setDecodedContentReady(true)
+        setDecodedContentError(null)
+      })
       return
     }
 
     let cancelled = false
-    setDecodedContentReady(false)
-    setDecodedContentError(null)
+    queueMicrotask(() => {
+      setDecodedContentReady(false)
+      setDecodedContentError(null)
+    })
 
     void contentQuery.data.blob
       .text()
@@ -365,15 +356,6 @@ export function ExplorerPreviewPage() {
                     </Text>
                   </div>
                 </Group>
-                <Button
-                  variant="default"
-                  leftSection={<IconUpload size={14} />}
-                  onClick={() =>
-                    navigate(`/app/explorer/details?irods_path=${encodeURIComponent(detailsQuery.data.path)}`)
-                  }
-                >
-                  Manage file
-                </Button>
               </Group>
 
               {!previewSpec.canOpenPreview ? (

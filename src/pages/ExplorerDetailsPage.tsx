@@ -54,6 +54,7 @@ import {
   addPathACL,
   addAVU,
   actionLinkUrl,
+  addPathReplica,
   ApiError,
   computePathChecksum,
   createPathTicket,
@@ -66,6 +67,7 @@ import {
   getPath,
   getPathACL,
   getPathAVUs,
+  getResources,
   searchGroups,
   searchUsers,
   getTickets,
@@ -73,13 +75,15 @@ import {
   type PathACLResponse,
   renamePath,
   setPathACLInheritance,
+  movePathReplica,
+  trimPathReplica,
   type ActionLink,
   type PathEntry,
   type TicketEntry,
   updatePathACL,
   updateTicket,
 } from '../lib/irods-rest'
-import { useSession } from '../providers/session'
+import { useSession } from '../providers/use-session'
 import { useUploadManager } from '../providers/upload-context'
 
 interface DeleteDialogState {
@@ -217,6 +221,14 @@ function checksumValueOnly(checksum?: { checksum?: string; type?: string }) {
 function filenameFromPath(path: string) {
   const segments = path.split('/').filter(Boolean)
   return segments.at(-1) ?? 'download'
+}
+
+function shellQuote(value: string) {
+  if (!value) {
+    return "''"
+  }
+
+  return `'${value.replace(/'/g, `'\\''`)}'`
 }
 
 function ticketCreateAction(entry?: Pick<PathEntry, 'links'>): ActionLink | undefined {
@@ -405,7 +417,6 @@ export function ExplorerDetailsPage() {
   })
   const [aclPrincipalSelection, setACLPrincipalSelection] = useState<string | null>(null)
   const [aclPrincipalSearchValue, setACLPrincipalSearchValue] = useState('')
-  const [headerImagePreviewUrl, setHeaderImagePreviewUrl] = useState<string | null>(null)
   const [aclEdits, setACLEdits] = useState<Record<string, ACLPermissionState>>({})
   const [applyACLRecursively, setApplyACLRecursively] = useState(false)
   const [isAddingTicket, setIsAddingTicket] = useState(false)
@@ -423,6 +434,16 @@ export function ExplorerDetailsPage() {
   const [renameDialog, setRenameDialog] = useState<RenameDialogState | null>(null)
   const [renameName, setRenameName] = useState('')
   const [commandHintsOpened, setCommandHintsOpened] = useState(false)
+  const [storageCommandDetailsOpened, setStorageCommandDetailsOpened] = useState(false)
+  const [storageCommandSourceResource, setStorageCommandSourceResource] = useState('')
+  const [storageCommandDestinationResource, setStorageCommandDestinationResource] = useState('')
+  const [replicaAddResource, setReplicaAddResource] = useState('')
+  const [replicaAddUpdate, setReplicaAddUpdate] = useState(true)
+  const [replicaMoveSourceResource, setReplicaMoveSourceResource] = useState<string | null>(null)
+  const [replicaMoveDestinationResource, setReplicaMoveDestinationResource] = useState('')
+  const [replicaMoveUpdate, setReplicaMoveUpdate] = useState(true)
+  const [replicaMoveMinCopies, setReplicaMoveMinCopies] = useState('1')
+  const [replicaMoveMinAgeMinutes, setReplicaMoveMinAgeMinutes] = useState('0')
 
   const detailsQuery = useQuery({
     queryKey: ['path-detail', irodsPath, connection],
@@ -451,6 +472,12 @@ export function ExplorerDetailsPage() {
     queryKey: ['path-acls', irodsPath, connection],
     queryFn: () => getPathACL(irodsPath, connection.auth, connection.baseUrl),
     enabled: Boolean(irodsPath),
+  })
+  const resourcesQuery = useQuery({
+    queryKey: ['resources-top', connection.baseUrl, connection.auth.mode],
+    queryFn: () => getResources(connection.auth, connection.baseUrl, { scope: 'top' }),
+    enabled: Boolean(irodsPath),
+    staleTime: 60_000,
   })
   const aclPrincipalSearchTerm = aclPrincipalSearchValue.trim()
   const aclPrincipalQuery = useQuery({
@@ -506,32 +533,21 @@ export function ExplorerDetailsPage() {
     queryFn: () => getTickets(connection.auth, connection.baseUrl),
     enabled: Boolean(irodsPath),
   })
-  useEffect(() => {
+  const headerImagePreviewUrl = useMemo(() => {
     if (headerPreviewSpec?.kind !== 'image' || !headerImagePreviewQuery.data?.blob) {
+      return null
+    }
+
+    return URL.createObjectURL(headerImagePreviewQuery.data.blob)
+  }, [headerImagePreviewQuery.data, headerPreviewSpec?.kind])
+
+  useEffect(() => {
+    if (!headerImagePreviewUrl) {
       return undefined
     }
 
-    const objectUrl = URL.createObjectURL(headerImagePreviewQuery.data.blob)
-    setHeaderImagePreviewUrl((current) => {
-      if (current) {
-        URL.revokeObjectURL(current)
-      }
-      return objectUrl
-    })
-
-    return () => {
-      URL.revokeObjectURL(objectUrl)
-    }
-  }, [headerImagePreviewQuery.data?.blob, headerPreviewSpec?.kind])
-
-  useEffect(() => {
-    setHeaderImagePreviewUrl((current) => {
-      if (current) {
-        URL.revokeObjectURL(current)
-      }
-      return null
-    })
-  }, [irodsPath])
+    return () => URL.revokeObjectURL(headerImagePreviewUrl)
+  }, [headerImagePreviewUrl])
   const checksumMutation = useMutation({
     mutationFn: () => computePathChecksum(irodsPath, connection.auth, connection.baseUrl),
     onSuccess: async (payload) => {
@@ -754,6 +770,97 @@ export function ExplorerDetailsPage() {
       })
     },
   })
+  const addReplicaMutation = useMutation({
+    mutationFn: (input: { resource: string; update: boolean }) =>
+      addPathReplica(
+        irodsPath,
+        {
+          resource: input.resource,
+          update: input.update,
+        },
+        connection.auth,
+        connection.baseUrl,
+      ),
+    onSuccess: async () => {
+      notifications.show({
+        title: 'Replica added',
+        message: 'Data object replica created.',
+        color: 'teal',
+      })
+      setReplicaAddResource('')
+      await detailsQuery.refetch()
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'Replica add failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+  const moveReplicaMutation = useMutation({
+    mutationFn: (input: {
+      source_resource: string
+      destination_resource: string
+      update: boolean
+      min_copies: number
+      min_age_minutes: number
+    }) =>
+      movePathReplica(
+        irodsPath,
+        {
+          source_resource: input.source_resource,
+          destination_resource: input.destination_resource,
+          update: input.update,
+          min_copies: input.min_copies,
+          min_age_minutes: input.min_age_minutes,
+        },
+        connection.auth,
+        connection.baseUrl,
+      ),
+    onSuccess: async () => {
+      notifications.show({
+        title: 'Replica moved',
+        message: 'Replica phymove completed.',
+        color: 'teal',
+      })
+      setReplicaMoveDestinationResource('')
+      await detailsQuery.refetch()
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'Replica move failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+  const trimReplicaMutation = useMutation({
+    mutationFn: (input: { resource: string }) =>
+      trimPathReplica(
+        irodsPath,
+        {
+          resource: input.resource,
+        },
+        connection.auth,
+        connection.baseUrl,
+      ),
+    onSuccess: async () => {
+      notifications.show({
+        title: 'Replica trimmed',
+        message: 'Replica removed from the selected resource.',
+        color: 'teal',
+      })
+      await detailsQuery.refetch()
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'Replica trim failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
   const createTicketMutation = useMutation({
     mutationFn: (input: {
       href: ActionLink
@@ -941,10 +1048,77 @@ export function ExplorerDetailsPage() {
     () => [...(aclQuery.data?.users ?? []), ...(aclQuery.data?.groups ?? [])],
     [aclQuery.data],
   )
-  const commandCue = detailsQuery.data?.cmd_cue
-  const hasCommandHints = Boolean(commandCue?.gocmd?.trim() || commandCue?.icommand?.trim())
+  const replicaResourceOptions = useMemo(() => {
+    const resources = new Set<string>()
+    for (const replica of detailsQuery.data?.replicas ?? []) {
+      const resourceName = replica.resource_name?.trim()
+      if (resourceName) {
+        resources.add(resourceName)
+      }
+    }
+
+    return Array.from(resources).map((resourceName) => ({
+      value: resourceName,
+      label: resourceName,
+    }))
+  }, [detailsQuery.data?.replicas])
+  const topResourceOptions = useMemo(
+    () =>
+      (resourcesQuery.data?.resources ?? []).map((resource) => ({
+        value: resource.name,
+        label: resource.name,
+      })),
+    [resourcesQuery.data],
+  )
+  const commandCues = useMemo(
+    () =>
+      (detailsQuery.data?.cmd_cues ?? []).filter(
+        (cue) => {
+          const operation = cue.operation?.trim().toLowerCase()
+          const isPutOrGet = operation === 'put' || operation === 'get'
+          return isPutOrGet && (Boolean(cue.gocmd?.trim()) || Boolean(cue.icommand?.trim()))
+        },
+      ),
+    [detailsQuery.data?.cmd_cues],
+  )
+  const hasCommandHints = commandCues.length > 0
   const isCollection = detailsQuery.data?.kind === 'collection'
   const isDataObject = detailsQuery.data?.kind === 'data_object'
+  const selectedReplicaMoveSourceResource = useMemo(() => {
+    const current = replicaMoveSourceResource?.trim() ?? ''
+    if (current && replicaResourceOptions.some((entry) => entry.value === current)) {
+      return current
+    }
+    return replicaResourceOptions[0]?.value ?? null
+  }, [replicaMoveSourceResource, replicaResourceOptions])
+  const selectedReplicaAddResource = useMemo(() => {
+    const current = replicaAddResource.trim()
+    if (current && topResourceOptions.some((entry) => entry.value === current)) {
+      return current
+    }
+    return topResourceOptions[0]?.value ?? ''
+  }, [replicaAddResource, topResourceOptions])
+  const selectedReplicaMoveDestinationResource = useMemo(() => {
+    const current = replicaMoveDestinationResource.trim()
+    if (current && topResourceOptions.some((entry) => entry.value === current)) {
+      return current
+    }
+    return topResourceOptions[0]?.value ?? ''
+  }, [replicaMoveDestinationResource, topResourceOptions])
+  const selectedStorageCommandSourceResource = useMemo(() => {
+    const current = storageCommandSourceResource.trim()
+    if (current && topResourceOptions.some((entry) => entry.value === current)) {
+      return current
+    }
+    return topResourceOptions[0]?.value ?? ''
+  }, [storageCommandSourceResource, topResourceOptions])
+  const selectedStorageCommandDestinationResource = useMemo(() => {
+    const current = storageCommandDestinationResource.trim()
+    if (current && topResourceOptions.some((entry) => entry.value === current)) {
+      return current
+    }
+    return topResourceOptions[0]?.value ?? ''
+  }, [storageCommandDestinationResource, topResourceOptions])
   const backPath = useMemo(() => {
     if (!detailsQuery.data) {
       return ''
@@ -958,6 +1132,22 @@ export function ExplorerDetailsPage() {
     () => detailsQuery.data?.parent?.irods_path ?? '',
     [detailsQuery.data],
   )
+
+  const storageCommandSourcePlaceholder = selectedStorageCommandSourceResource.trim()
+    ? shellQuote(selectedStorageCommandSourceResource.trim())
+    : '<srcResource>'
+  const storageCommandDestinationPlaceholder = selectedStorageCommandDestinationResource.trim()
+    ? shellQuote(selectedStorageCommandDestinationResource.trim())
+    : '<destResource>'
+  const storageCommandPathPlaceholder = irodsPath.trim()
+    ? shellQuote(irodsPath.trim())
+    : (isCollection ? '<collection>' : '<dataObj>')
+  const phyMoveCommand = isCollection
+    ? `iphymv -r -S ${storageCommandSourcePlaceholder} -R ${storageCommandDestinationPlaceholder} ${storageCommandPathPlaceholder}`
+    : `iphymv -S ${storageCommandSourcePlaceholder} -R ${storageCommandDestinationPlaceholder} ${storageCommandPathPlaceholder}`
+  const replicateCommand = isCollection
+    ? `irepl -r -S ${storageCommandSourcePlaceholder} -R ${storageCommandDestinationPlaceholder} ${storageCommandPathPlaceholder}`
+    : `irepl -S ${storageCommandSourcePlaceholder} -R ${storageCommandDestinationPlaceholder} ${storageCommandPathPlaceholder}`
 
   const copyText = async (value: string, label: string) => {
     try {
@@ -1364,6 +1554,84 @@ export function ExplorerDetailsPage() {
     setRenameName(label)
   }
 
+  const submitReplicaAdd = () => {
+    const resource = selectedReplicaAddResource.trim()
+    if (!resource) {
+      notifications.show({
+        title: 'Replica add is incomplete',
+        message: 'Target resource is required.',
+        color: 'red',
+      })
+      return
+    }
+
+    addReplicaMutation.mutate({
+      resource,
+      update: replicaAddUpdate,
+    })
+  }
+
+  const submitReplicaMove = () => {
+    const sourceResource = selectedReplicaMoveSourceResource?.trim() ?? ''
+    const destinationResource = selectedReplicaMoveDestinationResource.trim()
+    const minCopies = Number.parseInt(replicaMoveMinCopies.trim() || '0', 10)
+    const minAgeMinutes = Number.parseInt(replicaMoveMinAgeMinutes.trim() || '0', 10)
+
+    if (!sourceResource || !destinationResource) {
+      notifications.show({
+        title: 'Replica move is incomplete',
+        message: 'Source and destination resources are required.',
+        color: 'red',
+      })
+      return
+    }
+    if (sourceResource === destinationResource) {
+      notifications.show({
+        title: 'Replica move is invalid',
+        message: 'Destination resource must differ from source resource.',
+        color: 'red',
+      })
+      return
+    }
+    if (Number.isNaN(minCopies) || minCopies < 0 || Number.isNaN(minAgeMinutes) || minAgeMinutes < 0) {
+      notifications.show({
+        title: 'Replica move is invalid',
+        message: 'min_copies and min_age_minutes must be zero or greater integers.',
+        color: 'red',
+      })
+      return
+    }
+
+    moveReplicaMutation.mutate({
+      source_resource: sourceResource,
+      destination_resource: destinationResource,
+      update: replicaMoveUpdate,
+      min_copies: minCopies,
+      min_age_minutes: minAgeMinutes,
+    })
+  }
+
+  const submitReplicaTrim = (resourceName: string) => {
+    const resource = resourceName.trim()
+    if (!resource) {
+      notifications.show({
+        title: 'Replica trim is incomplete',
+        message: 'Resource is required.',
+        color: 'red',
+      })
+      return
+    }
+
+    const confirmed = window.confirm(`Delete replica on resource "${resource}"?`)
+    if (!confirmed) {
+      return
+    }
+
+    trimReplicaMutation.mutate({
+      resource,
+    })
+  }
+
   if (!irodsPath) {
     return (
       <Alert variant="light" color="red" title="Missing path">
@@ -1484,61 +1752,165 @@ export function ExplorerDetailsPage() {
             Documentation-only command examples for this {detailsQuery.data?.kind === 'collection' ? 'collection' : 'file'}.
           </Text>
 
-          {commandCue?.operation ? (
-            <Group gap="xs">
-              <Badge variant="light" color="blue">
-                {commandCue.operation}
-              </Badge>
-            </Group>
-          ) : null}
-
-          {commandCue?.icommand?.trim() ? (
-            <Stack gap="xs">
-              <Group justify="space-between" align="center">
-                <Text size="sm" fw={600}>
-                  iCommand
-                </Text>
-                <Button
-                  size="xs"
-                  variant="subtle"
-                  leftSection={<IconCopy size={14} />}
-                  onClick={() => void copyText(commandCue.icommand!, 'iCommand')}
+          {commandCues.length > 0 ? (
+            <Stack gap="md">
+              {commandCues.map((cue, index) => (
+                <Paper
+                  key={`${cue.operation ?? 'operation'}-${index}`}
+                  withBorder
+                  radius="md"
+                  p="sm"
                 >
-                  Copy
-                </Button>
-              </Group>
-              <Code block className="details-code-cell">
-                {commandCue.icommand}
-              </Code>
-            </Stack>
-          ) : null}
+                  <Stack gap="sm">
+                    {cue.operation?.trim() ? (
+                      <Group gap="xs">
+                        <Badge variant="light" color="blue">
+                          {cue.operation}
+                        </Badge>
+                      </Group>
+                    ) : null}
 
-          {commandCue?.gocmd?.trim() ? (
-            <Stack gap="xs">
-              <Group justify="space-between" align="center">
-                <Text size="sm" fw={600}>
-                  goCmd
-                </Text>
-                <Button
-                  size="xs"
-                  variant="subtle"
-                  leftSection={<IconCopy size={14} />}
-                  onClick={() => void copyText(commandCue.gocmd!, 'goCmd')}
-                >
-                  Copy
-                </Button>
-              </Group>
-              <Code block className="details-code-cell">
-                {commandCue.gocmd}
-              </Code>
-            </Stack>
-          ) : null}
+                    {cue.icommand?.trim() ? (
+                      <Stack gap="xs">
+                        <Group justify="space-between" align="center">
+                          <Text size="sm" fw={600}>
+                            iCommand
+                          </Text>
+                          <Button
+                            size="xs"
+                            variant="subtle"
+                            leftSection={<IconCopy size={14} />}
+                            onClick={() => void copyText(cue.icommand!, `iCommand (${cue.operation ?? index + 1})`)}
+                          >
+                            Copy command
+                          </Button>
+                        </Group>
+                        <Code block className="details-code-cell">
+                          {cue.icommand}
+                        </Code>
+                      </Stack>
+                    ) : null}
 
-          {!commandCue?.icommand?.trim() && !commandCue?.gocmd?.trim() ? (
+                    {cue.gocmd?.trim() ? (
+                      <Stack gap="xs">
+                        <Group justify="space-between" align="center">
+                          <Text size="sm" fw={600}>
+                            goCmd
+                          </Text>
+                          <Button
+                            size="xs"
+                            variant="subtle"
+                            leftSection={<IconCopy size={14} />}
+                            onClick={() => void copyText(cue.gocmd!, `goCmd (${cue.operation ?? index + 1})`)}
+                          >
+                            Copy command
+                          </Button>
+                        </Group>
+                        <Code block className="details-code-cell">
+                          {cue.gocmd}
+                        </Code>
+                      </Stack>
+                    ) : null}
+                  </Stack>
+                </Paper>
+              ))}
+            </Stack>
+          ) : (
             <Text size="sm" c="dimmed">
               No command hints are available for this path.
             </Text>
-          ) : null}
+          )}
+
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setCommandHintsOpened(false)}>
+              Close
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={storageCommandDetailsOpened}
+        onClose={() => setStorageCommandDetailsOpened(false)}
+        title="Storage command details"
+        centered
+        size="lg"
+      >
+        <Stack gap="md">
+          <Text size="sm" c="dimmed">
+            Build iCommand examples for {isCollection ? 'collection' : 'data object'} replica operations.
+          </Text>
+
+          <Group align="flex-end" grow>
+            <Select
+              label="Source resource"
+              placeholder="Select source resource"
+              data={topResourceOptions}
+              value={selectedStorageCommandSourceResource || null}
+              onChange={(value) => setStorageCommandSourceResource(value ?? '')}
+              searchable
+              allowDeselect={false}
+              disabled={resourcesQuery.isLoading}
+            />
+            <Select
+              label="Destination resource"
+              placeholder="Select destination resource"
+              data={topResourceOptions}
+              value={selectedStorageCommandDestinationResource || null}
+              onChange={(value) => setStorageCommandDestinationResource(value ?? '')}
+              searchable
+              allowDeselect={false}
+              disabled={resourcesQuery.isLoading}
+            />
+          </Group>
+
+          <Paper withBorder radius="md" p="sm">
+            <Stack gap="xs">
+              <Group justify="space-between" align="center">
+                <Badge variant="light" color="blue">
+                  Phymove
+                </Badge>
+                <Button
+                  size="xs"
+                  variant="subtle"
+                  leftSection={<IconCopy size={14} />}
+                  onClick={() => void copyText(phyMoveCommand, 'Phymove command')}
+                >
+                  Copy command
+                </Button>
+              </Group>
+              <Code block className="details-code-cell">
+                {phyMoveCommand}
+              </Code>
+            </Stack>
+          </Paper>
+
+          <Paper withBorder radius="md" p="sm">
+            <Stack gap="xs">
+              <Group justify="space-between" align="center">
+                <Badge variant="light" color="teal">
+                  Replicate
+                </Badge>
+                <Button
+                  size="xs"
+                  variant="subtle"
+                  leftSection={<IconCopy size={14} />}
+                  onClick={() => void copyText(replicateCommand, 'Replicate command')}
+                >
+                  Copy command
+                </Button>
+              </Group>
+              <Code block className="details-code-cell">
+                {replicateCommand}
+              </Code>
+            </Stack>
+          </Paper>
+
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setStorageCommandDetailsOpened(false)}>
+              Close
+            </Button>
+          </Group>
         </Stack>
       </Modal>
 
@@ -1823,7 +2195,7 @@ export function ExplorerDetailsPage() {
                 <Tabs defaultValue="overview" keepMounted={false}>
                   <Tabs.List grow>
                     <Tabs.Tab value="overview">Overview</Tabs.Tab>
-                    {isDataObject ? <Tabs.Tab value="storage">Storage</Tabs.Tab> : null}
+                    {isDataObject || isCollection ? <Tabs.Tab value="storage">Storage</Tabs.Tab> : null}
                     <Tabs.Tab value="avus">AVUs</Tabs.Tab>
                     <Tabs.Tab value="permissions">Permissions</Tabs.Tab>
                     <Tabs.Tab value="tickets">Tickets</Tabs.Tab>
@@ -1913,15 +2285,26 @@ export function ExplorerDetailsPage() {
                     </Card>
                   </Tabs.Panel>
 
-                  {isDataObject ? (
+                  {isDataObject || isCollection ? (
                     <Tabs.Panel value="storage" pt="md">
+                      {isDataObject ? (
                       <Card shadow="sm" radius="xl" padding="lg">
                         <Stack gap="sm">
-                          <Group gap="xs">
-                            <ThemeIcon variant="light" color="gray" size="md">
-                              <IconBinaryTree2 size={14} />
-                            </ThemeIcon>
-                            <Title order={4}>Storage Detail</Title>
+                          <Group justify="space-between" align="center">
+                            <Group gap="xs">
+                              <ThemeIcon variant="light" color="gray" size="md">
+                                <IconBinaryTree2 size={14} />
+                              </ThemeIcon>
+                              <Title order={4}>Storage Detail</Title>
+                            </Group>
+                            <Button
+                              size="xs"
+                              variant="default"
+                              leftSection={<IconTerminal2 size={14} />}
+                              onClick={() => setStorageCommandDetailsOpened(true)}
+                            >
+                              Command details
+                            </Button>
                           </Group>
                           <InfoRow
                             label="Replica count"
@@ -1939,6 +2322,102 @@ export function ExplorerDetailsPage() {
                             label="Replica owner"
                             value={detailsQuery.data.replicas?.[0]?.owner ?? 'N/A'}
                           />
+
+                          <Divider label="Replica operations" labelPosition="left" />
+
+                          {resourcesQuery.isError ? (
+                            <Alert color="yellow" variant="light" title="Resource list unavailable">
+                              {resourcesQuery.error.message}
+                            </Alert>
+                          ) : null}
+
+                          <Paper withBorder radius="md" p="sm">
+                            <Stack gap="xs">
+                              <Text size="sm" fw={600}>
+                                Add replica
+                              </Text>
+                              <Group align="flex-end" gap="xs">
+                                <Select
+                                  label="Resource"
+                                  placeholder="Select resource"
+                                  data={topResourceOptions}
+                                  value={selectedReplicaAddResource || null}
+                                  onChange={(value) => setReplicaAddResource(value ?? '')}
+                                  searchable
+                                  allowDeselect={false}
+                                  disabled={addReplicaMutation.isPending || resourcesQuery.isLoading}
+                                />
+                                <Checkbox
+                                  label="Update"
+                                  checked={replicaAddUpdate}
+                                  onChange={(event) => setReplicaAddUpdate(event.currentTarget.checked)}
+                                  disabled={addReplicaMutation.isPending}
+                                />
+                                <Button
+                                  size="xs"
+                                  onClick={submitReplicaAdd}
+                                  loading={addReplicaMutation.isPending}
+                                >
+                                  Add
+                                </Button>
+                              </Group>
+                            </Stack>
+                          </Paper>
+
+                          <Paper withBorder radius="md" p="sm">
+                            <Stack gap="xs">
+                              <Text size="sm" fw={600}>
+                                Phymove replica
+                              </Text>
+                              <Group align="flex-end" gap="xs">
+                                <Select
+                                  label="Source resource"
+                                  data={replicaResourceOptions}
+                                  value={selectedReplicaMoveSourceResource}
+                                  onChange={(value) => setReplicaMoveSourceResource(value)}
+                                  allowDeselect={false}
+                                  disabled={moveReplicaMutation.isPending || replicaResourceOptions.length === 0}
+                                />
+                                <Select
+                                  label="Destination resource"
+                                  placeholder="Select resource"
+                                  data={topResourceOptions}
+                                  value={selectedReplicaMoveDestinationResource || null}
+                                  onChange={(value) => setReplicaMoveDestinationResource(value ?? '')}
+                                  searchable
+                                  allowDeselect={false}
+                                  disabled={moveReplicaMutation.isPending || resourcesQuery.isLoading}
+                                />
+                                <TextInput
+                                  label="min_copies"
+                                  value={replicaMoveMinCopies}
+                                  onChange={(event) => setReplicaMoveMinCopies(event.currentTarget.value)}
+                                  w={120}
+                                  disabled={moveReplicaMutation.isPending}
+                                />
+                                <TextInput
+                                  label="min_age_minutes"
+                                  value={replicaMoveMinAgeMinutes}
+                                  onChange={(event) => setReplicaMoveMinAgeMinutes(event.currentTarget.value)}
+                                  w={140}
+                                  disabled={moveReplicaMutation.isPending}
+                                />
+                                <Checkbox
+                                  label="Update"
+                                  checked={replicaMoveUpdate}
+                                  onChange={(event) => setReplicaMoveUpdate(event.currentTarget.checked)}
+                                  disabled={moveReplicaMutation.isPending}
+                                />
+                                <Button
+                                  size="xs"
+                                  onClick={submitReplicaMove}
+                                  loading={moveReplicaMutation.isPending}
+                                >
+                                  Move
+                                </Button>
+                              </Group>
+                            </Stack>
+                          </Paper>
 
                           <Divider label="Replicas" labelPosition="left" />
 
@@ -1959,22 +2438,35 @@ export function ExplorerDetailsPage() {
                                     <Table.Td>{replica.number}</Table.Td>
                                     <Table.Td>
                                       <Stack gap={2}>
-                                        {replica.resource_name ? (
-                                          <Anchor
-                                            size="sm"
-                                            fw={600}
-                                            underline="never"
-                                            onClick={() =>
-                                              openResourceDetails(replica.resource_name!)
-                                            }
-                                          >
-                                            {replica.resource_name}
-                                          </Anchor>
-                                        ) : (
-                                          <Text size="sm" fw={600}>
-                                            N/A
-                                          </Text>
-                                        )}
+                                        <Group gap="xs" wrap="nowrap" align="center">
+                                          {replica.resource_name ? (
+                                            <Anchor
+                                              size="sm"
+                                              fw={600}
+                                              underline="never"
+                                              onClick={() =>
+                                                openResourceDetails(replica.resource_name!)
+                                              }
+                                            >
+                                              {replica.resource_name}
+                                            </Anchor>
+                                          ) : (
+                                            <Text size="sm" fw={600}>
+                                              N/A
+                                            </Text>
+                                          )}
+                                          {replica.resource_name ? (
+                                            <ActionIcon
+                                              variant="subtle"
+                                              color="red"
+                                              aria-label={`Delete replica on ${replica.resource_name}`}
+                                              onClick={() => submitReplicaTrim(replica.resource_name!)}
+                                              disabled={trimReplicaMutation.isPending}
+                                            >
+                                              <IconTrash size={16} />
+                                            </ActionIcon>
+                                          ) : null}
+                                        </Group>
                                         <Text size="xs" c="dimmed">
                                           {replica.resource_hierarchy ?? 'No hierarchy'}
                                         </Text>
@@ -2027,6 +2519,28 @@ export function ExplorerDetailsPage() {
                           )}
                         </Stack>
                       </Card>
+                      ) : (
+                        <Card shadow="sm" radius="xl" padding="lg">
+                          <Stack gap="sm">
+                            <Group justify="space-between" align="center">
+                              <Group gap="xs">
+                                <ThemeIcon variant="light" color="gray" size="md">
+                                  <IconBinaryTree2 size={14} />
+                                </ThemeIcon>
+                                <Title order={4}>Storage Detail</Title>
+                              </Group>
+                              <Button
+                                size="xs"
+                                variant="default"
+                                leftSection={<IconTerminal2 size={14} />}
+                                onClick={() => setStorageCommandDetailsOpened(true)}
+                              >
+                                Command details
+                              </Button>
+                            </Group>
+                          </Stack>
+                        </Card>
+                      )}
                     </Tabs.Panel>
                   ) : null}
 

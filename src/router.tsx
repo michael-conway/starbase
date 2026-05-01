@@ -1,6 +1,5 @@
 import { lazy, Suspense, type ComponentType } from 'react'
-import { Loader, Stack } from '@mantine/core'
-import { Navigate, Outlet, createBrowserRouter } from 'react-router-dom'
+import { Navigate, createBrowserRouter } from 'react-router-dom'
 import App from './App'
 import { primarySections } from './app-sections'
 import { ExplorerDetailsPage } from './pages/ExplorerDetailsPage'
@@ -8,30 +7,7 @@ import { ExplorerPreviewPage } from './pages/ExplorerPreviewPage'
 import { LoginPage } from './pages/LoginPage'
 import { ResourceDetailsPage } from './pages/ResourceDetailsPage'
 import { SetupPage } from './pages/SetupPage'
-import { useSession } from './providers/session'
-
-function HomeRedirect() {
-  const { isAuthenticated } = useSession()
-  return <Navigate to={isAuthenticated ? '/app/explorer' : '/login'} replace />
-}
-
-function RequireSession() {
-  const { isAuthenticated } = useSession()
-
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />
-  }
-
-  return <Outlet />
-}
-
-function RouteFallback() {
-  return (
-    <Stack align="center" justify="center" py="xl" mih={240}>
-      <Loader color="teal" />
-    </Stack>
-  )
-}
+import { HomeRedirect, RequireSession, RouteFallback } from './router-components'
 
 function lazyElement(
   loadModule: () => Promise<Record<string, unknown>>,

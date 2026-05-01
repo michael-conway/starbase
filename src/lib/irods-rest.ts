@@ -53,7 +53,7 @@ export interface PathEntry {
   path: string
   kind: 'data_object' | 'collection'
   zone: string
-  cmd_cue?: PathCommandCue
+  cmd_cues?: PathCommandCue[]
   mime_type?: string
   display_size?: string
   created_at?: string
@@ -98,6 +98,12 @@ export interface PathChildrenResponse {
   irods_path: string
   path_segments: PathSegmentLink[]
   children: PathEntry[]
+}
+
+export interface PathReplicasResponse {
+  irods_path: string
+  path_segments: PathSegmentLink[]
+  replicas: PathReplica[]
 }
 
 export interface AVUEntry {
@@ -652,6 +658,83 @@ export function uploadPathContents(
     }
 
     xhr.send(formData)
+  })
+}
+
+export function getPathReplicas(
+  irodsPath: string,
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: { verbose?: number },
+) {
+  return request<PathReplicasResponse>(`/api/v1/path/replicas${withPath(irodsPath, options)}`, {
+    auth,
+    baseUrl,
+  })
+}
+
+export function addPathReplica(
+  irodsPath: string,
+  payload: {
+    resource: string
+    update?: boolean
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  return request<PathReplicasResponse>(`/api/v1/path/replicas${withPath(irodsPath)}`, {
+    auth,
+    baseUrl,
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function movePathReplica(
+  irodsPath: string,
+  payload: {
+    source_resource: string
+    destination_resource: string
+    update?: boolean
+    min_copies?: number
+    min_age_minutes?: number
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  return request<PathReplicasResponse>(`/api/v1/path/replicas${withPath(irodsPath)}`, {
+    auth,
+    baseUrl,
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function trimPathReplica(
+  irodsPath: string,
+  payload: {
+    resource?: string
+    replica_number?: number
+    min_copies?: number
+    min_age_minutes?: number
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  return request<PathReplicasResponse>(`/api/v1/path/replicas${withPath(irodsPath)}`, {
+    auth,
+    baseUrl,
+    method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
   })
 }
 

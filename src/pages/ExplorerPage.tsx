@@ -40,7 +40,7 @@ import {
 } from '@tabler/icons-react'
 import { displayName, formatDateTime, homePathForUser } from '../features/explorer'
 import { ApiError, createPathChild, deletePath, getPath, getPathChildren, renamePath, type PathEntry } from '../lib/irods-rest'
-import { useSession } from '../providers/session'
+import { useSession } from '../providers/use-session'
 import { useUploadManager } from '../providers/upload-context'
 
 type CreateKind = 'collection' | 'data_object'

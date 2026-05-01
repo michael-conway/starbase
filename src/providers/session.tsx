@@ -1,38 +1,20 @@
 import {
-  createContext,
-  useContext,
   useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from 'react'
-import type { AuthMode, RequestAuth } from '../lib/irods-rest'
-
-interface StoredPreferences {
-  authMode: AuthMode
-  baseUrl: string
-}
+import type { RequestAuth } from '../lib/irods-rest'
+import {
+  SessionContext,
+  type SessionContextValue,
+  type StoredPreferences,
+} from './session-context'
 
 interface SessionSecretState {
   token: string
   username: string
   password: string
-}
-
-interface SessionContextValue {
-  isAuthenticated: boolean
-  connection: {
-    auth: RequestAuth
-    baseUrl: string
-  }
-  preferences: StoredPreferences
-  oidcToken: string
-  basicUsername: string
-  signInBasic: (input: { username: string; password: string; baseUrl: string }) => void
-  signInOidc: (input: { token: string; baseUrl: string }) => void
-  updateBaseUrl: (baseUrl: string) => void
-  setPreferredAuthMode: (mode: AuthMode) => void
-  clearSession: () => void
 }
 
 const preferencesStorageKey = 'starbase.preferences'
@@ -48,8 +30,6 @@ const defaultSecrets: SessionSecretState = {
   username: '',
   password: '',
 }
-
-const SessionContext = createContext<SessionContextValue | null>(null)
 
 function readLocalStorage<T>(key: string, fallback: T): T {
   try {
@@ -158,14 +138,4 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   )
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>
-}
-
-export function useSession() {
-  const context = useContext(SessionContext)
-
-  if (!context) {
-    throw new Error('useSession must be used within a SessionProvider')
-  }
-
-  return context
 }

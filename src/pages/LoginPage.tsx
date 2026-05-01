@@ -19,7 +19,7 @@ import {
   IconLock,
 } from '@tabler/icons-react'
 import type { AuthMode } from '../lib/irods-rest'
-import { useSession } from '../providers/session'
+import { useSession } from '../providers/use-session'
 
 export function LoginPage() {
   const {

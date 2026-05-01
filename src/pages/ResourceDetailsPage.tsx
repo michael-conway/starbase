@@ -23,7 +23,7 @@ import {
 } from '@tabler/icons-react'
 import { formatDateTime } from '../features/explorer'
 import { getResources } from '../lib/irods-rest'
-import { useSession } from '../providers/session'
+import { useSession } from '../providers/use-session'
 
 export function ResourceDetailsPage() {
   const { connection } = useSession()
