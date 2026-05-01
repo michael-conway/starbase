@@ -88,6 +88,7 @@ export function ExplorerPreviewPage() {
   const [searchParams] = useSearchParams()
   const { connection } = useSession()
   const irodsPath = searchParams.get('irods_path')?.trim() ?? ''
+  const explorerQuery = searchParams.get('explorer_query')?.trim() ?? ''
   const [textValue, setTextValue] = useState('')
   const [originalTextValue, setOriginalTextValue] = useState('')
   const [tableRows, setTableRows] = useState<string[][]>([['']])
@@ -304,15 +305,17 @@ export function ExplorerPreviewPage() {
             <Button
               variant="default"
               leftSection={<IconArrowLeft size={14} />}
-              onClick={() => navigate(`/app/explorer/details?irods_path=${encodeURIComponent(irodsPath)}`)}
+              onClick={() => {
+                const params = new URLSearchParams({
+                  irods_path: irodsPath,
+                })
+                if (explorerQuery) {
+                  params.set('explorer_query', explorerQuery)
+                }
+                navigate(`/app/explorer/details?${params.toString()}`)
+              }}
             >
               Back to details
-            </Button>
-            <Button
-              variant="subtle"
-              onClick={() => navigate(`/app/explorer?irods_path=${encodeURIComponent(parentPath(irodsPath))}`)}
-            >
-              Back to explorer
             </Button>
           </Group>
         </Group>

@@ -93,6 +93,35 @@ body {
   align-items: center;
 }
 
+.explorer-controls-panel {
+  border: 1px solid var(--app-border);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgba(243, 247, 250, 0.92), rgba(239, 244, 248, 0.9));
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.explorer-search-panel {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.8);
+  padding: 10px;
+}
+
+.explorer-search-pattern {
+  min-width: 260px;
+  flex: 1;
+}
+
+.explorer-hover-path {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .explorer-path-input {
   flex: 1;
 }

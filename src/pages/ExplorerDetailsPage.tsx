@@ -400,6 +400,16 @@ export function ExplorerDetailsPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const irodsPath = searchParams.get('irods_path')?.trim() ?? ''
+  const explorerQuery = searchParams.get('explorer_query')?.trim() ?? ''
+  const explorerReturnQueryString = useMemo(() => {
+    if (!explorerQuery) {
+      return ''
+    }
+
+    const params = new URLSearchParams(explorerQuery)
+    params.delete('explorer_query')
+    return params.toString()
+  }, [explorerQuery])
   const [isAddingAVU, setIsAddingAVU] = useState(false)
   const [avuForm, setAVUForm] = useState({
     attrib: '',
@@ -444,6 +454,35 @@ export function ExplorerDetailsPage() {
   const [replicaMoveUpdate, setReplicaMoveUpdate] = useState(true)
   const [replicaMoveMinCopies, setReplicaMoveMinCopies] = useState('1')
   const [replicaMoveMinAgeMinutes, setReplicaMoveMinAgeMinutes] = useState('0')
+
+  const detailsUrlForPath = (path: string) => {
+    const params = new URLSearchParams({
+      irods_path: path,
+    })
+    if (explorerQuery) {
+      params.set('explorer_query', explorerQuery)
+    }
+    return `/app/explorer/details?${params.toString()}`
+  }
+
+  const navigateToExplorer = (irodsPathOverride?: string) => {
+    if (explorerReturnQueryString) {
+      const params = new URLSearchParams(explorerReturnQueryString)
+      if (irodsPathOverride?.trim()) {
+        params.set('irods_path', irodsPathOverride.trim())
+      }
+      const nextQuery = params.toString()
+      navigate(nextQuery ? `/app/explorer?${nextQuery}` : '/app/explorer')
+      return
+    }
+
+    if (irodsPathOverride?.trim()) {
+      navigate(`/app/explorer?irods_path=${encodeURIComponent(irodsPathOverride.trim())}`)
+      return
+    }
+
+    navigate('/app/explorer')
+  }
 
   const detailsQuery = useQuery({
     queryKey: ['path-detail', irodsPath, connection],
@@ -969,13 +1008,11 @@ export function ExplorerDetailsPage() {
       setDeleteForce(false)
 
       if (detailsQuery.data?.parent?.irods_path) {
-        navigate(
-          `/app/explorer?irods_path=${encodeURIComponent(detailsQuery.data.parent.irods_path)}`,
-        )
+        navigateToExplorer(detailsQuery.data.parent.irods_path)
         return
       }
 
-      navigate('/app/explorer')
+      navigateToExplorer()
     },
     onError: (error: Error) => {
       if (error instanceof ApiError && error.status === 409) {
@@ -1023,7 +1060,7 @@ export function ExplorerDetailsPage() {
       })
       setRenameDialog(null)
       setRenameName('')
-      navigate(`/app/explorer/details?irods_path=${encodeURIComponent(renamed.path)}`, {
+      navigate(detailsUrlForPath(renamed.path), {
         replace: true,
       })
     },
@@ -1928,11 +1965,11 @@ export function ExplorerDetailsPage() {
               leftSection={<IconArrowLeft size={16} />}
               onClick={() => {
                 if (backPath) {
-                  navigate(`/app/explorer?irods_path=${encodeURIComponent(backPath)}`)
+                  navigateToExplorer(backPath)
                   return
                 }
 
-                navigate('/app/explorer')
+                navigateToExplorer()
               }}
             >
               Back to explorer
@@ -1945,9 +1982,7 @@ export function ExplorerDetailsPage() {
                 key={crumb.irods_path}
                 variant="subtle"
                 size="xs"
-                onClick={() =>
-                  navigate(`/app/explorer?irods_path=${encodeURIComponent(crumb.irods_path)}`)
-                }
+                onClick={() => navigateToExplorer(crumb.irods_path)}
               >
                 {crumb.display_name}
               </Button>
@@ -2074,11 +2109,15 @@ export function ExplorerDetailsPage() {
                           type="button"
                           className="details-preview-tile"
                           disabled={!headerPreviewSpec.canOpenPreview}
-                          onClick={() =>
-                            navigate(
-                              `/app/explorer/preview?irods_path=${encodeURIComponent(detailsQuery.data.path)}`,
-                            )
-                          }
+                          onClick={() => {
+                            const params = new URLSearchParams({
+                              irods_path: detailsQuery.data.path,
+                            })
+                            if (explorerQuery) {
+                              params.set('explorer_query', explorerQuery)
+                            }
+                            navigate(`/app/explorer/preview?${params.toString()}`)
+                          }}
                         >
                           <div className="details-preview-media">
                             {headerPreviewSpec.kind === 'image' ? (
@@ -2161,11 +2200,7 @@ export function ExplorerDetailsPage() {
                     {isCollection ? (
                       <Button
                         variant="light"
-                        onClick={() =>
-                          navigate(
-                            `/app/explorer?irods_path=${encodeURIComponent(detailsQuery.data.path)}`,
-                          )
-                        }
+                        onClick={() => navigateToExplorer(detailsQuery.data.path)}
                       >
                         Open collection
                       </Button>
@@ -2173,11 +2208,7 @@ export function ExplorerDetailsPage() {
                     {detailsQuery.data.parent ? (
                       <Button
                         variant="light"
-                        onClick={() =>
-                          navigate(
-                            `/app/explorer?irods_path=${encodeURIComponent(detailsQuery.data.parent!.irods_path)}`,
-                          )
-                        }
+                        onClick={() => navigateToExplorer(detailsQuery.data.parent!.irods_path)}
                       >
                         Open parent collection
                       </Button>

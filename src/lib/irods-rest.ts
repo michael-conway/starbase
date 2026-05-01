@@ -98,6 +98,13 @@ export interface PathChildrenResponse {
   irods_path: string
   path_segments: PathSegmentLink[]
   children: PathEntry[]
+  search?: {
+    name_pattern?: string
+    recursive?: boolean
+    search_scope?: 'children' | 'subtree' | 'absolute'
+    case_sensitive?: boolean
+    matched_count?: number
+  }
 }
 
 export interface PathReplicasResponse {
@@ -496,8 +503,55 @@ export function getPathChildren(
   irodsPath: string,
   auth: RequestAuth,
   baseUrl?: string,
+  options?: {
+    name_pattern?: string
+    search_scope?: 'children' | 'subtree' | 'absolute'
+    recursive?: boolean
+    case_sensitive?: boolean
+    sort?: 'path' | 'name' | 'kind' | 'size' | 'created_at' | 'updated_at'
+    order?: 'asc' | 'desc'
+    limit?: number
+    offset?: number
+  },
 ) {
-  return request<PathChildrenResponse>(`/api/v1/path/children${withPath(irodsPath)}`, {
+  const params = new URLSearchParams({
+    irods_path: irodsPath,
+  })
+
+  const namePattern = options?.name_pattern?.trim()
+  if (namePattern) {
+    params.set('name_pattern', namePattern)
+  }
+
+  if (options?.search_scope) {
+    params.set('search_scope', options.search_scope)
+  }
+
+  if (options?.recursive !== undefined) {
+    params.set('recursive', `${options.recursive}`)
+  }
+
+  if (options?.case_sensitive !== undefined) {
+    params.set('case_sensitive', `${options.case_sensitive}`)
+  }
+
+  if (options?.sort) {
+    params.set('sort', options.sort)
+  }
+
+  if (options?.order) {
+    params.set('order', options.order)
+  }
+
+  if (options?.limit !== undefined) {
+    params.set('limit', `${options.limit}`)
+  }
+
+  if (options?.offset !== undefined) {
+    params.set('offset', `${options.offset}`)
+  }
+
+  return request<PathChildrenResponse>(`/api/v1/path/children?${params.toString()}`, {
     auth,
     baseUrl,
   })

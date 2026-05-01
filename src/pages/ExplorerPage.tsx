@@ -10,9 +10,11 @@ import {
   Card,
   Checkbox,
   Group,
+  HoverCard,
   Loader,
   Modal,
   Radio,
+  Select,
   Stack,
   Switch,
   Table,
@@ -34,6 +36,7 @@ import {
   IconHome2,
   IconPlus,
   IconRefresh,
+  IconSearch,
   IconUpload,
   IconTrash,
   IconX,
@@ -55,6 +58,81 @@ interface RenameState {
   path: string
   draftName: string
   kind: PathEntry['kind']
+}
+
+type SearchScope = 'children' | 'subtree' | 'absolute'
+type SearchSort = 'path' | 'name' | 'kind' | 'size' | 'created_at' | 'updated_at'
+type SearchOrder = 'asc' | 'desc'
+
+const searchScopeOptions = [
+  { value: 'children', label: 'This folder only' },
+  { value: 'subtree', label: 'This folder + descendants' },
+  { value: 'absolute', label: 'Full path (advanced)' },
+] as const
+
+const searchSortOptions = [
+  { value: 'name', label: 'Name' },
+  { value: 'path', label: 'Path' },
+  { value: 'kind', label: 'Kind' },
+  { value: 'size', label: 'Size' },
+  { value: 'created_at', label: 'Created' },
+  { value: 'updated_at', label: 'Updated' },
+] as const
+
+const searchOrderOptions = [
+  { value: 'asc', label: 'Ascending' },
+  { value: 'desc', label: 'Descending' },
+] as const
+
+const searchLimitOptions = [
+  { value: '50', label: '50' },
+  { value: '100', label: '100' },
+  { value: '200', label: '200' },
+  { value: '500', label: '500' },
+] as const
+
+function parseSearchScope(value: string | null): SearchScope {
+  if (value === 'subtree' || value === 'absolute' || value === 'children') {
+    return value
+  }
+  return 'subtree'
+}
+
+function parseSearchSort(value: string | null): SearchSort {
+  if (
+    value === 'path' ||
+    value === 'name' ||
+    value === 'kind' ||
+    value === 'size' ||
+    value === 'created_at' ||
+    value === 'updated_at'
+  ) {
+    return value
+  }
+  return 'name'
+}
+
+function parseSearchOrder(value: string | null): SearchOrder {
+  if (value === 'desc' || value === 'asc') {
+    return value
+  }
+  return 'asc'
+}
+
+function parseSearchLimit(value: string | null): number {
+  const parsed = Number.parseInt(value ?? '', 10)
+  if (Number.isNaN(parsed)) {
+    return 200
+  }
+  return Math.max(1, Math.min(1000, parsed))
+}
+
+function parseSearchOffset(value: string | null): number {
+  const parsed = Number.parseInt(value ?? '', 10)
+  if (Number.isNaN(parsed)) {
+    return 0
+  }
+  return Math.max(0, parsed)
 }
 
 function quickLocations(path: string, username?: string) {
@@ -96,9 +174,23 @@ export function ExplorerPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const userHomePath = homePathForUser(basicUsername)
   const initialPath = searchParams.get('irods_path')?.trim() || userHomePath
+  const searchPattern = searchParams.get('pattern')?.trim() ?? ''
+  const searchScope = parseSearchScope(searchParams.get('scope'))
+  const searchCaseSensitive = searchParams.get('case_sensitive')?.toLowerCase() !== 'false'
+  const searchSort = parseSearchSort(searchParams.get('sort'))
+  const searchOrder = parseSearchOrder(searchParams.get('order'))
+  const searchLimit = parseSearchLimit(searchParams.get('limit'))
+  const searchOffset = parseSearchOffset(searchParams.get('offset'))
+  const advancedSearchOpen = searchParams.get('advanced')?.toLowerCase() === 'true'
+  const searchActive = searchPattern.length > 0
   const [draftPathState, setDraftPathState] = useState({
     sourcePath: initialPath,
     value: initialPath,
+  })
+  const [searchPatternDraftState, setSearchPatternDraftState] = useState({
+    sourcePath: initialPath,
+    sourcePattern: searchPattern,
+    value: searchPattern,
   })
   const [selectedChildrenState, setSelectedChildrenState] = useState<{
     path: string
@@ -117,8 +209,14 @@ export function ExplorerPage() {
   const [dropTargetPath, setDropTargetPath] = useState<string | null>(null)
   const { requestFilesUpload, openFilePicker } = useUploadManager()
   const selectedPath = initialPath
+  const explorerQueryString = searchParams.toString()
   const draftPath =
     draftPathState.sourcePath === initialPath ? draftPathState.value : initialPath
+  const searchPatternDraft =
+    searchPatternDraftState.sourcePath === initialPath &&
+    searchPatternDraftState.sourcePattern === searchPattern
+      ? searchPatternDraftState.value
+      : searchPattern
   const selectedChildren =
     selectedChildrenState.path === initialPath ? selectedChildrenState.selected : []
 
@@ -127,6 +225,22 @@ export function ExplorerPage() {
       sourcePath: initialPath,
       value,
     })
+  }
+
+  const setSearchPatternDraft = (value: string) => {
+    setSearchPatternDraftState({
+      sourcePath: initialPath,
+      sourcePattern: searchPattern,
+      value,
+    })
+  }
+
+  const updateExplorerSearchParams = (
+    updater: (params: URLSearchParams) => void,
+  ) => {
+    const next = new URLSearchParams(searchParams)
+    updater(next)
+    setSearchParams(next)
   }
 
   const setSelectedChildren = (
@@ -150,7 +264,14 @@ export function ExplorerPage() {
   const openCollection = (nextPath: string) => {
     const normalized = nextPath.trim() || userHomePath
     setDraftPath(normalized)
-    setSearchParams(normalized === userHomePath ? {} : { irods_path: normalized })
+    updateExplorerSearchParams((params) => {
+      if (normalized === userHomePath) {
+        params.delete('irods_path')
+      } else {
+        params.set('irods_path', normalized)
+      }
+      params.set('offset', '0')
+    })
     setSelectedChildrenState({
       path: normalized,
       selected: [],
@@ -168,7 +289,14 @@ export function ExplorerPage() {
         return
       }
 
-      navigate(`/app/explorer/details?irods_path=${encodeURIComponent(normalized)}`)
+      const detailsParams = new URLSearchParams({
+        irods_path: normalized,
+      })
+      if (explorerQueryString) {
+        detailsParams.set('explorer_query', explorerQueryString)
+      }
+
+      navigate(`/app/explorer/details?${detailsParams.toString()}`)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to open path'
       notifications.show({
@@ -181,7 +309,14 @@ export function ExplorerPage() {
 
   const openDetails = (nextPath: string) => {
     const normalized = nextPath.trim() || userHomePath
-    navigate(`/app/explorer/details?irods_path=${encodeURIComponent(normalized)}`)
+    const detailsParams = new URLSearchParams({
+      irods_path: normalized,
+    })
+    if (explorerQueryString) {
+      detailsParams.set('explorer_query', explorerQueryString)
+    }
+
+    navigate(`/app/explorer/details?${detailsParams.toString()}`)
   }
 
   const entryQuery = useQuery({
@@ -189,9 +324,39 @@ export function ExplorerPage() {
     queryFn: () => getPath(selectedPath, connection.auth, connection.baseUrl),
   })
 
+  const childrenQueryOptions = searchActive
+    ? {
+        name_pattern: searchPattern,
+        search_scope: searchScope,
+        case_sensitive: searchCaseSensitive,
+        sort: searchSort,
+        order: searchOrder,
+        limit: searchLimit,
+        offset: searchOffset,
+      }
+    : undefined
+
   const childrenQuery = useQuery({
-    queryKey: ['path-children', selectedPath, connection],
-    queryFn: () => getPathChildren(selectedPath, connection.auth, connection.baseUrl),
+    queryKey: [
+      'path-children',
+      selectedPath,
+      connection,
+      searchActive,
+      searchActive ? searchPattern : '',
+      searchActive ? searchScope : 'children',
+      searchActive ? searchCaseSensitive : true,
+      searchActive ? searchSort : 'name',
+      searchActive ? searchOrder : 'asc',
+      searchActive ? searchLimit : 0,
+      searchActive ? searchOffset : 0,
+    ],
+    queryFn: () =>
+      getPathChildren(
+        selectedPath,
+        connection.auth,
+        connection.baseUrl,
+        childrenQueryOptions,
+      ),
     enabled:
       entryQuery.data?.kind === 'collection' && entryQuery.data.path === selectedPath,
   })
@@ -200,7 +365,12 @@ export function ExplorerPage() {
     mutationFn: async () => {
       const entry = await getPath(selectedPath, connection.auth, connection.baseUrl)
       if (entry.kind === 'collection') {
-        await getPathChildren(selectedPath, connection.auth, connection.baseUrl)
+        await getPathChildren(
+          selectedPath,
+          connection.auth,
+          connection.baseUrl,
+          childrenQueryOptions,
+        )
       }
       return entry
     },
@@ -357,6 +527,81 @@ export function ExplorerPage() {
   const allChildrenSelected = children.length > 0 && selectedChildren.length === children.length
   const someChildrenSelected =
     selectedChildren.length > 0 && selectedChildren.length < children.length
+  const matchedCount = childrenResponse?.search?.matched_count
+  const shownCount = children.length
+  const searchSummary = searchActive
+    ? `${shownCount} shown${matchedCount !== undefined ? ` of ${matchedCount}` : ''}`
+    : `${shownCount} item${shownCount === 1 ? '' : 's'}`
+  const hasPreviousPage = searchActive && searchOffset > 0
+  const hasNextPage =
+    searchActive && (matchedCount !== undefined
+      ? searchOffset + searchLimit < matchedCount
+      : shownCount >= searchLimit)
+
+  const applySearch = () => {
+    const normalizedPattern = searchPatternDraft.trim()
+    const effectiveScope = advancedSearchOpen ? searchScope : 'subtree'
+    const effectiveCaseSensitive = advancedSearchOpen ? searchCaseSensitive : true
+    updateExplorerSearchParams((params) => {
+      if (normalizedPattern) {
+        params.set('pattern', normalizedPattern)
+        params.delete('recursive')
+        params.set('scope', effectiveScope)
+        params.set('case_sensitive', `${effectiveCaseSensitive}`)
+        if (advancedSearchOpen) {
+          params.set('sort', searchSort)
+          params.set('order', searchOrder)
+          params.set('limit', `${searchLimit}`)
+        } else {
+          params.delete('sort')
+          params.delete('order')
+          params.delete('limit')
+        }
+      } else {
+        params.delete('pattern')
+        params.delete('scope')
+        params.delete('case_sensitive')
+        params.delete('sort')
+        params.delete('order')
+        params.delete('limit')
+      }
+      params.set('offset', '0')
+    })
+  }
+
+  const toggleAdvancedSearch = () => {
+    updateExplorerSearchParams((params) => {
+      if (advancedSearchOpen) {
+        params.delete('advanced')
+      } else {
+        params.set('advanced', 'true')
+      }
+    })
+  }
+
+  const clearSearch = () => {
+    setSearchPatternDraft('')
+    updateExplorerSearchParams((params) => {
+      params.delete('pattern')
+      params.delete('advanced')
+      params.delete('scope')
+      params.delete('recursive')
+      params.delete('case_sensitive')
+      params.delete('sort')
+      params.delete('order')
+      params.delete('limit')
+      params.delete('offset')
+    })
+  }
+
+  const movePage = (direction: 'prev' | 'next') => {
+    const nextOffset = direction === 'next'
+      ? searchOffset + searchLimit
+      : Math.max(0, searchOffset - searchLimit)
+    updateExplorerSearchParams((params) => {
+      params.set('offset', `${nextOffset}`)
+    })
+  }
 
   const toggleChildSelection = (childPath: string) => {
     setSelectedChildren((current) =>
@@ -616,7 +861,148 @@ export function ExplorerPage() {
             ))}
           </Breadcrumbs>
 
-          <div className="explorer-menubar">
+          <div className="explorer-controls-panel">
+            <div className="explorer-search-panel">
+              <Stack gap="sm">
+              <Group align="flex-end" wrap="wrap">
+                <TextInput
+                  label="Name pattern"
+                  placeholder="*.txt, report-??.csv, [ab]*"
+                  value={searchPatternDraft}
+                  onChange={(event) => setSearchPatternDraft(event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      applySearch()
+                    }
+                  }}
+                  className="explorer-search-pattern"
+                />
+                <Button leftSection={<IconSearch size={16} />} onClick={applySearch}>
+                  Search
+                </Button>
+                <Button variant="default" onClick={clearSearch}>
+                  Clear
+                </Button>
+                <Button
+                  variant="subtle"
+                  onClick={toggleAdvancedSearch}
+                >
+                  {advancedSearchOpen ? 'Hide advanced' : 'Advanced search'}
+                </Button>
+              </Group>
+
+              {advancedSearchOpen ? (
+                <Card withBorder radius="sm" padding="sm">
+                  <Stack gap="sm">
+                    <Group align="flex-end" wrap="wrap">
+                      <Select
+                        label="Scope"
+                        data={searchScopeOptions as unknown as { value: string; label: string }[]}
+                        value={searchScope}
+                        onChange={(value) => {
+                          const nextScope = parseSearchScope(value)
+                          updateExplorerSearchParams((params) => {
+                            params.set('scope', nextScope)
+                            params.set('offset', '0')
+                          })
+                        }}
+                        allowDeselect={false}
+                        w={260}
+                      />
+                      <Switch
+                        label="Case sensitive"
+                        checked={searchCaseSensitive}
+                        onChange={(event) => {
+                          updateExplorerSearchParams((params) => {
+                            params.set('case_sensitive', `${event.currentTarget.checked}`)
+                            params.set('offset', '0')
+                          })
+                        }}
+                      />
+                      <Select
+                        label="Sort"
+                        data={searchSortOptions as unknown as { value: string; label: string }[]}
+                        value={searchSort}
+                        onChange={(value) => {
+                          const nextSort = parseSearchSort(value)
+                          updateExplorerSearchParams((params) => {
+                            params.set('sort', nextSort)
+                            params.set('offset', '0')
+                          })
+                        }}
+                        allowDeselect={false}
+                        w={180}
+                      />
+                      <Select
+                        label="Order"
+                        data={searchOrderOptions as unknown as { value: string; label: string }[]}
+                        value={searchOrder}
+                        onChange={(value) => {
+                          const nextOrder = parseSearchOrder(value)
+                          updateExplorerSearchParams((params) => {
+                            params.set('order', nextOrder)
+                            params.set('offset', '0')
+                          })
+                        }}
+                        allowDeselect={false}
+                        w={150}
+                      />
+                      <Select
+                        label="Page size"
+                        data={searchLimitOptions as unknown as { value: string; label: string }[]}
+                        value={`${searchLimit}`}
+                        onChange={(value) => {
+                          const nextLimit = parseSearchLimit(value)
+                          updateExplorerSearchParams((params) => {
+                            params.set('limit', `${nextLimit}`)
+                            params.set('offset', '0')
+                          })
+                        }}
+                        allowDeselect={false}
+                        w={140}
+                      />
+                    </Group>
+
+                    <Group justify="space-between" align="center" wrap="wrap">
+                      <Text size="sm" c="dimmed">
+                        {searchSummary}
+                      </Text>
+                      <Group gap="xs" align="end">
+                        <Button
+                          variant="default"
+                          size="xs"
+                          onClick={() => movePage('prev')}
+                          disabled={!hasPreviousPage}
+                        >
+                          Previous
+                        </Button>
+                        <Button
+                          variant="default"
+                          size="xs"
+                          onClick={() => movePage('next')}
+                          disabled={!hasNextPage}
+                        >
+                          Next
+                        </Button>
+                      </Group>
+                    </Group>
+                  </Stack>
+                </Card>
+              ) : null}
+
+              {searchActive ? (
+                <Alert color="blue" variant="light" title="Wildcard search active">
+                  Pattern <strong>{searchPattern}</strong> in <strong>{selectedPath}</strong>
+                  {childrenResponse?.search?.search_scope
+                    ? ` (${childrenResponse.search.search_scope})`
+                    : ''}
+                </Alert>
+              ) : null}
+              </Stack>
+            </div>
+
+            <div className="explorer-menubar">
             <Button
               leftSection={<IconPlus size={16} />}
               variant="light"
@@ -665,10 +1051,11 @@ export function ExplorerPage() {
             <TextInput
               placeholder={userHomePath}
               value={draftPath}
-                  onChange={(event) => setDraftPath(event.currentTarget.value)}
+              onChange={(event) => setDraftPath(event.currentTarget.value)}
               className="explorer-path-input"
             />
             <Button onClick={() => void openPath(draftPath)}>Open path</Button>
+          </div>
           </div>
 
           {entryQuery.isLoading ? (
@@ -824,16 +1211,43 @@ export function ExplorerPage() {
                           autoFocus
                         />
                       ) : (
-                        <Anchor
-                          fw={600}
-                          underline="never"
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            void openPath(child.path)
-                          }}
+                        <HoverCard
+                          position="bottom-start"
+                          shadow="md"
+                          withArrow
+                          openDelay={120}
+                          closeDelay={80}
+                          width={560}
                         >
-                          {child.path_segments.at(-1)?.display_name ?? displayName(child.path)}
-                        </Anchor>
+                          <HoverCard.Target>
+                            <Anchor
+                              fw={600}
+                              underline="never"
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                void openPath(child.path)
+                              }}
+                            >
+                              {child.path_segments.at(-1)?.display_name ?? displayName(child.path)}
+                            </Anchor>
+                          </HoverCard.Target>
+                          <HoverCard.Dropdown>
+                            <Stack gap={4}>
+                              <Text size="xs" c="dimmed">
+                                Parent collection
+                              </Text>
+                              <Text size="sm" className="explorer-hover-path">
+                                {selectedPath}
+                              </Text>
+                              <Text size="xs" c="dimmed" mt={4}>
+                                Current {child.kind === 'collection' ? 'collection' : 'file'}
+                              </Text>
+                              <Text size="sm" className="explorer-hover-path">
+                                {child.path_segments.at(-1)?.display_name ?? displayName(child.path)}
+                              </Text>
+                            </Stack>
+                          </HoverCard.Dropdown>
+                        </HoverCard>
                       )}
                     </Table.Td>
                     <Table.Td>{child.kind === 'data_object' ? 'file' : 'folder'}</Table.Td>
@@ -913,7 +1327,7 @@ export function ExplorerPage() {
                   <Table.Tr>
                     <Table.Td colSpan={8}>
                       <Text size="sm" c="dimmed">
-                        Empty collection.
+                        {searchActive ? 'No matching items.' : 'Empty collection.'}
                       </Text>
                     </Table.Td>
                   </Table.Tr>
