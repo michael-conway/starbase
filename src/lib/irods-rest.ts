@@ -281,6 +281,60 @@ export interface GroupLookupResponse {
   groups: GroupLookupEntry[]
 }
 
+export interface FavoriteLinks {
+  self?: ActionLink
+  details?: ActionLink
+  update?: ActionLink
+  delete?: ActionLink
+}
+
+export interface FavoriteCollectionLinks {
+  self?: ActionLink
+  create?: ActionLink
+  update?: ActionLink
+  delete?: ActionLink
+}
+
+export interface FavoriteEntry {
+  name: string
+  absolute_path: string
+  links?: FavoriteLinks
+}
+
+export interface FavoriteCollectionResponse {
+  favorites: FavoriteEntry[]
+  count?: number
+  links?: FavoriteCollectionLinks
+}
+
+function validateFavoriteCollectionResponse(
+  response: FavoriteCollectionResponse,
+): FavoriteCollectionResponse {
+  const favorites = Array.isArray(response.favorites) ? response.favorites : []
+  favorites.forEach((favorite, index) => {
+    if (typeof favorite?.absolute_path !== 'string' || !favorite.absolute_path.trim()) {
+      throw new ApiError(
+        502,
+        `Invalid favorites payload: favorites[${index}].absolute_path is required.`,
+      )
+    }
+    if (!favorite.absolute_path.trim().startsWith('/')) {
+      throw new ApiError(
+        502,
+        `Invalid favorites payload: favorites[${index}].absolute_path must be absolute.`,
+      )
+    }
+    if (typeof favorite?.name !== 'string' || !favorite.name.trim()) {
+      throw new ApiError(
+        502,
+        `Invalid favorites payload: favorites[${index}].name is required.`,
+      )
+    }
+  })
+
+  return response
+}
+
 export interface PathContentsUploadResponse {
   path: string
   parent_path: string
@@ -434,14 +488,26 @@ async function request<T>(
 
   if (!response.ok) {
     let payload: ApiErrorPayload | null = null
+    let fallbackMessage: string | undefined
 
     try {
       payload = (await response.json()) as ApiErrorPayload
     } catch {
-      // Fall back to the HTTP status when the response body is not JSON.
+      try {
+        const text = (await response.text()).trim()
+        if (text) {
+          fallbackMessage = text
+        }
+      } catch {
+        // Fall back to the HTTP status when the response body is not JSON.
+      }
     }
 
-    throw buildApiError(response.status, payload)
+    throw new ApiError(
+      response.status,
+      payload?.message ?? fallbackMessage ?? `Request failed with status ${response.status}`,
+      payload?.code,
+    )
   }
 
   return (await response.json()) as T
@@ -525,6 +591,110 @@ export function searchGroups(
     auth,
     baseUrl,
   })
+}
+
+export function getFavorites(auth: RequestAuth, baseUrl?: string) {
+  return request<FavoriteCollectionResponse>('/api/v1/ext/favorites', {
+    auth,
+    baseUrl,
+  }).then((response) => validateFavoriteCollectionResponse(response))
+}
+
+export function addFavorite(
+  action: ActionLink,
+  payload: {
+    name: string
+    absolute_path: string
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  const absolutePath = requireAbsolutePath(payload.absolute_path, 'absolute_path')
+  const trimmedName = payload.name.trim()
+
+  return request<FavoriteCollectionResponse>(action.href, {
+    auth,
+    baseUrl,
+    method: action.method ?? 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      name: trimmedName,
+      absolute_path: absolutePath,
+    }),
+  })
+}
+
+export function renameFavorite(
+  action: ActionLink,
+  payload: {
+    name: string
+    absolute_path: string
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  const absolutePath = requireAbsolutePath(payload.absolute_path, 'absolute_path')
+  const trimmedName = payload.name.trim()
+
+  return request<FavoriteCollectionResponse>(action.href, {
+    auth,
+    baseUrl,
+    method: action.method ?? 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      name: trimmedName,
+      absolute_path: absolutePath,
+    }),
+  })
+}
+
+export async function removeFavorite(
+  action: ActionLink,
+  payload: {
+    absolute_path: string
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  const absolutePath = requireAbsolutePath(payload.absolute_path, 'absolute_path')
+  const response = await fetch(buildUrl(action.href, baseUrl), {
+    method: action.method ?? 'DELETE',
+    headers: {
+      ...buildHeaders(auth),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      absolute_path: absolutePath,
+    }),
+  })
+
+  if (!response.ok) {
+    let payloadError: ApiErrorPayload | null = null
+    let fallbackMessage: string | undefined
+
+    try {
+      payloadError = (await response.json()) as ApiErrorPayload
+    } catch {
+      try {
+        const text = (await response.text()).trim()
+        if (text) {
+          fallbackMessage = text
+        }
+      } catch {
+        // Fall back to the HTTP status when the response body is not JSON.
+      }
+    }
+
+    throw new ApiError(
+      response.status,
+      payloadError?.message ?? fallbackMessage ?? `Request failed with status ${response.status}`,
+      payloadError?.code,
+    )
+  }
 }
 
 export function getPath(

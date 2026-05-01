@@ -14,6 +14,7 @@ import './index.css'
 import { router } from './router'
 import { SessionProvider } from './providers/session'
 import { UploadProvider } from './providers/upload-provider'
+import { ApiError } from './lib/irods-rest'
 
 const theme = createTheme({
   primaryColor: 'teal',
@@ -43,7 +44,22 @@ const resolver: CSSVariablesResolver = () => ({
   dark: {},
 })
 
-const queryClient = new QueryClient()
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: (failureCount, error) => {
+        if (error instanceof ApiError && error.status >= 500) {
+          return false
+        }
+
+        return failureCount < 1
+      },
+      retryOnMount: false,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+    },
+  },
+})
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

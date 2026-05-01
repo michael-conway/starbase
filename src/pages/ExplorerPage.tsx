@@ -9,6 +9,7 @@ import {
   Button,
   Card,
   Checkbox,
+  Divider,
   Group,
   HoverCard,
   Loader,
@@ -49,13 +50,16 @@ import {
   createPathChildFromAction,
   deletePath,
   deletePathByAction,
+  getFavorites,
   getPath,
   getPathChildren,
   relocatePath,
   relocatePathByAction,
   renamePath,
   renamePathByAction,
+  removeFavorite,
   type ActionLink,
+  type FavoriteEntry,
   type PathEntry,
 } from '../lib/irods-rest'
 import { useSession } from '../providers/use-session'
@@ -386,6 +390,10 @@ export function ExplorerPage() {
     queryKey: ['path-entry', selectedPath, connection],
     queryFn: () => getPath(selectedPath, connection.auth, connection.baseUrl),
   })
+  const favoritesQuery = useQuery({
+    queryKey: ['favorites', connection],
+    queryFn: () => getFavorites(connection.auth, connection.baseUrl),
+  })
 
   const childrenQueryOptions = searchActive
     ? {
@@ -706,6 +714,40 @@ export function ExplorerPage() {
       })
     },
   })
+  const removeFavoriteMutation = useMutation({
+    mutationFn: async (favorite: FavoriteEntry) => {
+      const action = favorite.links?.delete ?? favoritesQuery.data?.links?.delete
+      if (!action) {
+        throw new ApiError(405, 'Favorite remove action is unavailable.')
+      }
+
+      await removeFavorite(
+        action,
+        {
+          absolute_path: favorite.absolute_path,
+        },
+        connection.auth,
+        connection.baseUrl,
+      )
+
+      return favorite
+    },
+    onSuccess: async (favorite) => {
+      notifications.show({
+        title: 'Favorite removed',
+        message: favorite.name,
+        color: 'teal',
+      })
+      await favoritesQuery.refetch()
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'Favorite remove failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
 
   const entry = entryQuery.data
   const childrenResponse =
@@ -714,6 +756,7 @@ export function ExplorerPage() {
   const selectedChildEntries = children.filter((child) => selectedChildren.includes(child.path))
   const breadcrumbs = childrenResponse?.path_segments ?? entry?.path_segments ?? []
   const locationOptions = quickLocations(selectedPath, basicUsername)
+  const favorites = favoritesQuery.data?.favorites ?? []
   const listingError = childrenQuery.isError ? listingErrorDetails(childrenQuery.error) : null
   const allChildrenSelected = children.length > 0 && selectedChildren.length === children.length
   const someChildrenSelected =
@@ -1207,6 +1250,56 @@ export function ExplorerPage() {
                 {location.label}
               </Button>
             ))}
+          </Stack>
+
+          <Divider />
+
+          <div>
+            <Text size="xs" tt="uppercase" fw={700} c="dimmed">
+              Favorites
+            </Text>
+          </div>
+
+          {favoritesQuery.isLoading ? (
+            <Text size="sm" c="dimmed">
+              Loading favorites...
+            </Text>
+          ) : null}
+
+          {favoritesQuery.isError ? (
+            <Alert color="red" variant="light" title="Unable to load favorites">
+              {favoritesQuery.error.message}
+            </Alert>
+          ) : null}
+
+          <Stack gap="xs">
+            {favorites.map((favorite) => (
+              <Group key={`${favorite.absolute_path}-${favorite.name}`} gap={6} wrap="nowrap">
+                <Button
+                  justify="flex-start"
+                  variant={selectedPath === favorite.absolute_path ? 'light' : 'subtle'}
+                  onClick={() => openPath(favorite.absolute_path)}
+                  className="explorer-favorite-button"
+                >
+                  {favorite.name}
+                </Button>
+                <ActionIcon
+                  variant="subtle"
+                  color="red"
+                  aria-label={`Remove favorite ${favorite.name}`}
+                  onClick={() => removeFavoriteMutation.mutate(favorite)}
+                  loading={removeFavoriteMutation.isPending}
+                >
+                  <IconTrash size={14} />
+                </ActionIcon>
+              </Group>
+            ))}
+
+            {!favorites.length && !favoritesQuery.isLoading && !favoritesQuery.isError ? (
+              <Text size="sm" c="dimmed">
+                No favorites.
+              </Text>
+            ) : null}
           </Stack>
         </Stack>
       </Card>

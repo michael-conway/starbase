@@ -42,6 +42,8 @@ import {
   IconKey,
   IconLock,
   IconPlus,
+  IconStar,
+  IconStarFilled,
   IconEye,
   IconTerminal2,
   IconTrash,
@@ -52,6 +54,7 @@ import { filePreviewSpec } from '../features/file-preview'
 import { displayName, formatDateTime } from '../features/explorer'
 import {
   addPathACL,
+  addFavorite,
   addAVU,
   actionLinkUrl,
   addPathReplica,
@@ -69,6 +72,7 @@ import {
   getPathChildren,
   getPathACL,
   getPathAVUs,
+  getFavorites,
   getResources,
   searchGroups,
   searchUsers,
@@ -78,11 +82,13 @@ import {
   renamePath,
   relocatePath,
   relocatePathByAction,
+  removeFavorite,
   renamePathByAction,
   setPathACLInheritance,
   movePathReplica,
   trimPathReplica,
   type ActionLink,
+  type FavoriteEntry,
   type PathEntry,
   type TicketEntry,
   updatePathACL,
@@ -567,6 +573,11 @@ export function ExplorerDetailsPage() {
     queryKey: ['resources-top', connection.baseUrl, connection.auth.mode],
     queryFn: () => getResources(connection.auth, connection.baseUrl, { scope: 'top' }),
     enabled: Boolean(irodsPath),
+    staleTime: 60_000,
+  })
+  const favoritesQuery = useQuery({
+    queryKey: ['favorites', connection],
+    queryFn: () => getFavorites(connection.auth, connection.baseUrl),
     staleTime: 60_000,
   })
   const relocateBrowsePath = relocateDialog?.browsePath ?? ''
@@ -1211,6 +1222,72 @@ export function ExplorerDetailsPage() {
       })
     },
   })
+  const addFavoriteMutation = useMutation({
+    mutationFn: async (input: { path: string; defaultName: string }) => {
+      const action = favoritesQuery.data?.links?.create
+      if (!action) {
+        throw new ApiError(405, 'Favorite add action is unavailable.')
+      }
+
+      return addFavorite(
+        action,
+        {
+          name: input.defaultName,
+          absolute_path: input.path,
+        },
+        connection.auth,
+        connection.baseUrl,
+      )
+    },
+    onSuccess: async (_, variables) => {
+      notifications.show({
+        title: 'Favorite added',
+        message: variables.path,
+        color: 'teal',
+      })
+      await favoritesQuery.refetch()
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'Favorite add failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+  const removeFavoriteMutation = useMutation({
+    mutationFn: async (favorite: FavoriteEntry) => {
+      const action = favorite.links?.delete ?? favoritesQuery.data?.links?.delete
+      if (!action) {
+        throw new ApiError(405, 'Favorite remove action is unavailable.')
+      }
+
+      await removeFavorite(
+        action,
+        {
+          absolute_path: favorite.absolute_path,
+        },
+        connection.auth,
+        connection.baseUrl,
+      )
+      return favorite
+    },
+    onSuccess: async (favorite) => {
+      notifications.show({
+        title: 'Favorite removed',
+        message: favorite.absolute_path,
+        color: 'teal',
+      })
+      await favoritesQuery.refetch()
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'Favorite remove failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
 
   const breadcrumbs = useMemo(() => detailsQuery.data?.path_segments ?? [], [detailsQuery.data])
   const ticketsForPath = useMemo(
@@ -1223,6 +1300,14 @@ export function ExplorerDetailsPage() {
   const aclEntries = useMemo(
     () => [...(aclQuery.data?.users ?? []), ...(aclQuery.data?.groups ?? [])],
     [aclQuery.data],
+  )
+  const favorites = useMemo(
+    () => favoritesQuery.data?.favorites ?? [],
+    [favoritesQuery.data?.favorites],
+  )
+  const currentFavorite = useMemo(
+    () => favorites.find((favorite) => favorite.absolute_path === detailsQuery.data?.path),
+    [favorites, detailsQuery.data?.path],
   )
   const replicaResourceOptions = useMemo(() => {
     const resources = new Set<string>()
@@ -1803,6 +1888,23 @@ export function ExplorerDetailsPage() {
       operation: relocateDialog.operation,
       sourcePath: detailsQuery.data.path,
       destinationCollectionPath,
+    })
+  }
+
+  const toggleFavorite = () => {
+    const path = detailsQuery.data?.path
+    if (!path) {
+      return
+    }
+
+    if (currentFavorite) {
+      removeFavoriteMutation.mutate(currentFavorite)
+      return
+    }
+
+    addFavoriteMutation.mutate({
+      path,
+      defaultName: displayName(path),
     })
   }
 
@@ -2387,6 +2489,16 @@ export function ExplorerDetailsPage() {
                             <Badge variant="dot" color="gray">
                               {detailsQuery.data.zone}
                             </Badge>
+                            <ActionIcon
+                              variant={currentFavorite ? 'filled' : 'light'}
+                              color={currentFavorite ? 'yellow' : 'gray'}
+                              aria-label={currentFavorite ? 'Remove favorite' : 'Add favorite'}
+                              onClick={toggleFavorite}
+                              loading={addFavoriteMutation.isPending || removeFavoriteMutation.isPending}
+                              disabled={!favoritesQuery.data?.links?.create && !currentFavorite?.links?.delete && !favoritesQuery.data?.links?.delete}
+                            >
+                              {currentFavorite ? <IconStarFilled size={16} /> : <IconStar size={16} />}
+                            </ActionIcon>
                             <Button
                               size="xs"
                               variant="default"

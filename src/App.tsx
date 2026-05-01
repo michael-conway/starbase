@@ -27,7 +27,7 @@ import {
 } from '@tabler/icons-react'
 import { primarySections } from './app-sections'
 import { defaultPath } from './features/explorer'
-import { getHealth, getServiceInfo } from './lib/irods-rest'
+import { getFavorites, getHealth, getServiceInfo } from './lib/irods-rest'
 import { useSession } from './providers/use-session'
 
 function userFromOIDCToken(token: string) {
@@ -97,7 +97,7 @@ function asObject(value: unknown): Record<string, unknown> {
 }
 
 function App() {
-  const { basicUsername, clearSession, connection, oidcToken } = useSession()
+  const { basicUsername, clearSession, connection, isAuthenticated, oidcToken } = useSession()
   const location = useLocation()
   const [menuOpened, setMenuOpened] = useState(false)
   const [serviceInfoOpened, setServiceInfoOpened] = useState(false)
@@ -111,6 +111,12 @@ function App() {
     queryKey: ['service-info', connection],
     queryFn: () => getServiceInfo(connection.auth, connection.baseUrl),
     enabled: serviceInfoOpened,
+    staleTime: 60_000,
+  })
+  useQuery({
+    queryKey: ['favorites', connection],
+    queryFn: () => getFavorites(connection.auth, connection.baseUrl),
+    enabled: isAuthenticated,
     staleTime: 60_000,
   })
   const currentUser =
