@@ -28,7 +28,7 @@ import {
 import { primarySections } from './app-sections'
 import { defaultPath } from './features/explorer'
 import { getHealth, getServiceInfo } from './lib/irods-rest'
-import { useSession } from './providers/session'
+import { useSession } from './providers/use-session'
 
 function userFromOIDCToken(token: string) {
   const payload = token.split('.')[1]

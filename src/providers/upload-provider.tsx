@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   ActionIcon,
   Badge,
@@ -21,7 +21,7 @@ import {
   IconX,
 } from '@tabler/icons-react'
 import { ApiError, uploadPathContents } from '../lib/irods-rest'
-import { useSession } from './session'
+import { useSession } from './use-session'
 import {
   UploadManagerContext,
   type UploadManagerContextValue,
@@ -80,7 +80,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   const countUploading = () =>
     uploads.filter((upload) => upload.status === 'uploading').length
 
-  const kickUploads = (snapshot?: UploadItem[]) => {
+  const kickUploads = useCallback((snapshot?: UploadItem[]) => {
     const currentUploads = snapshot ?? uploads
     const activeCount = currentUploads.filter((upload) => upload.status === 'uploading').length
     const availableSlots = Math.max(0, maxParallelUploads - activeCount)
@@ -196,7 +196,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
           setUploads((current) => [...current])
         })
     })
-  }
+  }, [connection.auth, connection.baseUrl, queryClient, uploads])
 
   const requestFilesUpload = (files: File[], options: UploadTargetOptions) => {
     if (files.length === 0) {
@@ -235,6 +235,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       total: file.size,
     }))
 
+    setDockCollapsed(false)
     setUploads((current) => [...current, ...nextUploads])
 
     setPendingSelection(null)
@@ -311,13 +312,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     }
 
     queueMicrotask(() => kickUploads())
-  }, [uploads])
-
-  useEffect(() => {
-    if (uploads.length > 0) {
-      setDockCollapsed(false)
-    }
-  }, [uploads.length])
+  }, [kickUploads, uploads])
 
   const contextValue = useMemo<UploadManagerContextValue>(
     () => ({

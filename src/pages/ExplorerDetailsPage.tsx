@@ -83,7 +83,7 @@ import {
   updatePathACL,
   updateTicket,
 } from '../lib/irods-rest'
-import { useSession } from '../providers/session'
+import { useSession } from '../providers/use-session'
 import { useUploadManager } from '../providers/upload-context'
 
 interface DeleteDialogState {
@@ -417,7 +417,6 @@ export function ExplorerDetailsPage() {
   })
   const [aclPrincipalSelection, setACLPrincipalSelection] = useState<string | null>(null)
   const [aclPrincipalSearchValue, setACLPrincipalSearchValue] = useState('')
-  const [headerImagePreviewUrl, setHeaderImagePreviewUrl] = useState<string | null>(null)
   const [aclEdits, setACLEdits] = useState<Record<string, ACLPermissionState>>({})
   const [applyACLRecursively, setApplyACLRecursively] = useState(false)
   const [isAddingTicket, setIsAddingTicket] = useState(false)
@@ -534,32 +533,21 @@ export function ExplorerDetailsPage() {
     queryFn: () => getTickets(connection.auth, connection.baseUrl),
     enabled: Boolean(irodsPath),
   })
-  useEffect(() => {
+  const headerImagePreviewUrl = useMemo(() => {
     if (headerPreviewSpec?.kind !== 'image' || !headerImagePreviewQuery.data?.blob) {
+      return null
+    }
+
+    return URL.createObjectURL(headerImagePreviewQuery.data.blob)
+  }, [headerImagePreviewQuery.data, headerPreviewSpec?.kind])
+
+  useEffect(() => {
+    if (!headerImagePreviewUrl) {
       return undefined
     }
 
-    const objectUrl = URL.createObjectURL(headerImagePreviewQuery.data.blob)
-    setHeaderImagePreviewUrl((current) => {
-      if (current) {
-        URL.revokeObjectURL(current)
-      }
-      return objectUrl
-    })
-
-    return () => {
-      URL.revokeObjectURL(objectUrl)
-    }
-  }, [headerImagePreviewQuery.data?.blob, headerPreviewSpec?.kind])
-
-  useEffect(() => {
-    setHeaderImagePreviewUrl((current) => {
-      if (current) {
-        URL.revokeObjectURL(current)
-      }
-      return null
-    })
-  }, [irodsPath])
+    return () => URL.revokeObjectURL(headerImagePreviewUrl)
+  }, [headerImagePreviewUrl])
   const checksumMutation = useMutation({
     mutationFn: () => computePathChecksum(irodsPath, connection.auth, connection.baseUrl),
     onSuccess: async (payload) => {
@@ -1096,6 +1084,41 @@ export function ExplorerDetailsPage() {
   const hasCommandHints = commandCues.length > 0
   const isCollection = detailsQuery.data?.kind === 'collection'
   const isDataObject = detailsQuery.data?.kind === 'data_object'
+  const selectedReplicaMoveSourceResource = useMemo(() => {
+    const current = replicaMoveSourceResource?.trim() ?? ''
+    if (current && replicaResourceOptions.some((entry) => entry.value === current)) {
+      return current
+    }
+    return replicaResourceOptions[0]?.value ?? null
+  }, [replicaMoveSourceResource, replicaResourceOptions])
+  const selectedReplicaAddResource = useMemo(() => {
+    const current = replicaAddResource.trim()
+    if (current && topResourceOptions.some((entry) => entry.value === current)) {
+      return current
+    }
+    return topResourceOptions[0]?.value ?? ''
+  }, [replicaAddResource, topResourceOptions])
+  const selectedReplicaMoveDestinationResource = useMemo(() => {
+    const current = replicaMoveDestinationResource.trim()
+    if (current && topResourceOptions.some((entry) => entry.value === current)) {
+      return current
+    }
+    return topResourceOptions[0]?.value ?? ''
+  }, [replicaMoveDestinationResource, topResourceOptions])
+  const selectedStorageCommandSourceResource = useMemo(() => {
+    const current = storageCommandSourceResource.trim()
+    if (current && topResourceOptions.some((entry) => entry.value === current)) {
+      return current
+    }
+    return topResourceOptions[0]?.value ?? ''
+  }, [storageCommandSourceResource, topResourceOptions])
+  const selectedStorageCommandDestinationResource = useMemo(() => {
+    const current = storageCommandDestinationResource.trim()
+    if (current && topResourceOptions.some((entry) => entry.value === current)) {
+      return current
+    }
+    return topResourceOptions[0]?.value ?? ''
+  }, [storageCommandDestinationResource, topResourceOptions])
   const backPath = useMemo(() => {
     if (!detailsQuery.data) {
       return ''
@@ -1110,61 +1133,11 @@ export function ExplorerDetailsPage() {
     [detailsQuery.data],
   )
 
-  useEffect(() => {
-    const firstResource = replicaResourceOptions[0]?.value ?? null
-    if (!firstResource) {
-      setReplicaMoveSourceResource(null)
-      return
-    }
-
-    setReplicaMoveSourceResource((current) => {
-      if (current && replicaResourceOptions.some((entry) => entry.value === current)) {
-        return current
-      }
-      return firstResource
-    })
-  }, [replicaResourceOptions])
-
-  useEffect(() => {
-    const firstTopResource = topResourceOptions[0]?.value ?? ''
-    if (!firstTopResource) {
-      return
-    }
-
-    setReplicaAddResource((current) => {
-      if (current && topResourceOptions.some((entry) => entry.value === current)) {
-        return current
-      }
-      return firstTopResource
-    })
-
-    setReplicaMoveDestinationResource((current) => {
-      if (current && topResourceOptions.some((entry) => entry.value === current)) {
-        return current
-      }
-      return firstTopResource
-    })
-
-    setStorageCommandSourceResource((current) => {
-      if (current && topResourceOptions.some((entry) => entry.value === current)) {
-        return current
-      }
-      return firstTopResource
-    })
-
-    setStorageCommandDestinationResource((current) => {
-      if (current && topResourceOptions.some((entry) => entry.value === current)) {
-        return current
-      }
-      return firstTopResource
-    })
-  }, [topResourceOptions])
-
-  const storageCommandSourcePlaceholder = storageCommandSourceResource.trim()
-    ? shellQuote(storageCommandSourceResource.trim())
+  const storageCommandSourcePlaceholder = selectedStorageCommandSourceResource.trim()
+    ? shellQuote(selectedStorageCommandSourceResource.trim())
     : '<srcResource>'
-  const storageCommandDestinationPlaceholder = storageCommandDestinationResource.trim()
-    ? shellQuote(storageCommandDestinationResource.trim())
+  const storageCommandDestinationPlaceholder = selectedStorageCommandDestinationResource.trim()
+    ? shellQuote(selectedStorageCommandDestinationResource.trim())
     : '<destResource>'
   const storageCommandPathPlaceholder = irodsPath.trim()
     ? shellQuote(irodsPath.trim())
@@ -1582,7 +1555,7 @@ export function ExplorerDetailsPage() {
   }
 
   const submitReplicaAdd = () => {
-    const resource = replicaAddResource.trim()
+    const resource = selectedReplicaAddResource.trim()
     if (!resource) {
       notifications.show({
         title: 'Replica add is incomplete',
@@ -1599,8 +1572,8 @@ export function ExplorerDetailsPage() {
   }
 
   const submitReplicaMove = () => {
-    const sourceResource = replicaMoveSourceResource?.trim() ?? ''
-    const destinationResource = replicaMoveDestinationResource.trim()
+    const sourceResource = selectedReplicaMoveSourceResource?.trim() ?? ''
+    const destinationResource = selectedReplicaMoveDestinationResource.trim()
     const minCopies = Number.parseInt(replicaMoveMinCopies.trim() || '0', 10)
     const minAgeMinutes = Number.parseInt(replicaMoveMinAgeMinutes.trim() || '0', 10)
 
@@ -1873,7 +1846,7 @@ export function ExplorerDetailsPage() {
               label="Source resource"
               placeholder="Select source resource"
               data={topResourceOptions}
-              value={storageCommandSourceResource || null}
+              value={selectedStorageCommandSourceResource || null}
               onChange={(value) => setStorageCommandSourceResource(value ?? '')}
               searchable
               allowDeselect={false}
@@ -1883,7 +1856,7 @@ export function ExplorerDetailsPage() {
               label="Destination resource"
               placeholder="Select destination resource"
               data={topResourceOptions}
-              value={storageCommandDestinationResource || null}
+              value={selectedStorageCommandDestinationResource || null}
               onChange={(value) => setStorageCommandDestinationResource(value ?? '')}
               searchable
               allowDeselect={false}
@@ -2368,7 +2341,7 @@ export function ExplorerDetailsPage() {
                                   label="Resource"
                                   placeholder="Select resource"
                                   data={topResourceOptions}
-                                  value={replicaAddResource || null}
+                                  value={selectedReplicaAddResource || null}
                                   onChange={(value) => setReplicaAddResource(value ?? '')}
                                   searchable
                                   allowDeselect={false}
@@ -2400,7 +2373,7 @@ export function ExplorerDetailsPage() {
                                 <Select
                                   label="Source resource"
                                   data={replicaResourceOptions}
-                                  value={replicaMoveSourceResource}
+                                  value={selectedReplicaMoveSourceResource}
                                   onChange={(value) => setReplicaMoveSourceResource(value)}
                                   allowDeselect={false}
                                   disabled={moveReplicaMutation.isPending || replicaResourceOptions.length === 0}
@@ -2409,7 +2382,7 @@ export function ExplorerDetailsPage() {
                                   label="Destination resource"
                                   placeholder="Select resource"
                                   data={topResourceOptions}
-                                  value={replicaMoveDestinationResource || null}
+                                  value={selectedReplicaMoveDestinationResource || null}
                                   onChange={(value) => setReplicaMoveDestinationResource(value ?? '')}
                                   searchable
                                   allowDeselect={false}
