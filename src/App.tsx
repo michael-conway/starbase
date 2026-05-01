@@ -22,6 +22,7 @@ import { useQuery } from '@tanstack/react-query'
 import {
   IconInfoCircle,
   IconLogout,
+  IconTool,
   IconUserCircle,
 } from '@tabler/icons-react'
 import { primarySections } from './app-sections'
@@ -340,6 +341,38 @@ function App() {
                       ? 'offline'
                       : 'checking'}
                 </Badge>
+
+                <Menu position="bottom-end" width={240} shadow="md">
+                  <Menu.Target>
+                    <ActionIcon
+                      variant="default"
+                      size="lg"
+                      aria-label="Open tools menu"
+                    >
+                      <IconTool size={22} />
+                    </ActionIcon>
+                  </Menu.Target>
+
+                  <Menu.Dropdown>
+                    <Menu.Label>Tools</Menu.Label>
+                    <Menu.Item
+                      component="a"
+                      href="https://irods.org/download/"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Get icommands
+                    </Menu.Item>
+                    <Menu.Item
+                      component="a"
+                      href="https://github.com/cyverse/gocommands/releases"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Get go-commands
+                    </Menu.Item>
+                  </Menu.Dropdown>
+                </Menu>
 
                 <Menu position="bottom-end" width={240} shadow="md">
                   <Menu.Target>

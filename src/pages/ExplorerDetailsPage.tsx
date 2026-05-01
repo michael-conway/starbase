@@ -223,6 +223,14 @@ function filenameFromPath(path: string) {
   return segments.at(-1) ?? 'download'
 }
 
+function shellQuote(value: string) {
+  if (!value) {
+    return "''"
+  }
+
+  return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
 function ticketCreateAction(entry?: Pick<PathEntry, 'links'>): ActionLink | undefined {
   const action = entry?.links?.create_ticket
   if (!action) {
@@ -427,6 +435,9 @@ export function ExplorerDetailsPage() {
   const [renameDialog, setRenameDialog] = useState<RenameDialogState | null>(null)
   const [renameName, setRenameName] = useState('')
   const [commandHintsOpened, setCommandHintsOpened] = useState(false)
+  const [storageCommandDetailsOpened, setStorageCommandDetailsOpened] = useState(false)
+  const [storageCommandSourceResource, setStorageCommandSourceResource] = useState('')
+  const [storageCommandDestinationResource, setStorageCommandDestinationResource] = useState('')
   const [replicaAddResource, setReplicaAddResource] = useState('')
   const [replicaAddUpdate, setReplicaAddUpdate] = useState(true)
   const [replicaMoveSourceResource, setReplicaMoveSourceResource] = useState<string | null>(null)
@@ -1071,8 +1082,18 @@ export function ExplorerDetailsPage() {
       })),
     [resourcesQuery.data],
   )
-  const commandCue = detailsQuery.data?.cmd_cue
-  const hasCommandHints = Boolean(commandCue?.gocmd?.trim() || commandCue?.icommand?.trim())
+  const commandCues = useMemo(
+    () =>
+      (detailsQuery.data?.cmd_cues ?? []).filter(
+        (cue) => {
+          const operation = cue.operation?.trim().toLowerCase()
+          const isPutOrGet = operation === 'put' || operation === 'get'
+          return isPutOrGet && (Boolean(cue.gocmd?.trim()) || Boolean(cue.icommand?.trim()))
+        },
+      ),
+    [detailsQuery.data?.cmd_cues],
+  )
+  const hasCommandHints = commandCues.length > 0
   const isCollection = detailsQuery.data?.kind === 'collection'
   const isDataObject = detailsQuery.data?.kind === 'data_object'
   const backPath = useMemo(() => {
@@ -1123,7 +1144,37 @@ export function ExplorerDetailsPage() {
       }
       return firstTopResource
     })
+
+    setStorageCommandSourceResource((current) => {
+      if (current && topResourceOptions.some((entry) => entry.value === current)) {
+        return current
+      }
+      return firstTopResource
+    })
+
+    setStorageCommandDestinationResource((current) => {
+      if (current && topResourceOptions.some((entry) => entry.value === current)) {
+        return current
+      }
+      return firstTopResource
+    })
   }, [topResourceOptions])
+
+  const storageCommandSourcePlaceholder = storageCommandSourceResource.trim()
+    ? shellQuote(storageCommandSourceResource.trim())
+    : '<srcResource>'
+  const storageCommandDestinationPlaceholder = storageCommandDestinationResource.trim()
+    ? shellQuote(storageCommandDestinationResource.trim())
+    : '<destResource>'
+  const storageCommandPathPlaceholder = irodsPath.trim()
+    ? shellQuote(irodsPath.trim())
+    : (isCollection ? '<collection>' : '<dataObj>')
+  const phyMoveCommand = isCollection
+    ? `iphymv -r -S ${storageCommandSourcePlaceholder} -R ${storageCommandDestinationPlaceholder} ${storageCommandPathPlaceholder}`
+    : `iphymv -S ${storageCommandSourcePlaceholder} -R ${storageCommandDestinationPlaceholder} ${storageCommandPathPlaceholder}`
+  const replicateCommand = isCollection
+    ? `irepl -r -S ${storageCommandSourcePlaceholder} -R ${storageCommandDestinationPlaceholder} ${storageCommandPathPlaceholder}`
+    : `irepl -S ${storageCommandSourcePlaceholder} -R ${storageCommandDestinationPlaceholder} ${storageCommandPathPlaceholder}`
 
   const copyText = async (value: string, label: string) => {
     try {
@@ -1728,61 +1779,165 @@ export function ExplorerDetailsPage() {
             Documentation-only command examples for this {detailsQuery.data?.kind === 'collection' ? 'collection' : 'file'}.
           </Text>
 
-          {commandCue?.operation ? (
-            <Group gap="xs">
-              <Badge variant="light" color="blue">
-                {commandCue.operation}
-              </Badge>
-            </Group>
-          ) : null}
-
-          {commandCue?.icommand?.trim() ? (
-            <Stack gap="xs">
-              <Group justify="space-between" align="center">
-                <Text size="sm" fw={600}>
-                  iCommand
-                </Text>
-                <Button
-                  size="xs"
-                  variant="subtle"
-                  leftSection={<IconCopy size={14} />}
-                  onClick={() => void copyText(commandCue.icommand!, 'iCommand')}
+          {commandCues.length > 0 ? (
+            <Stack gap="md">
+              {commandCues.map((cue, index) => (
+                <Paper
+                  key={`${cue.operation ?? 'operation'}-${index}`}
+                  withBorder
+                  radius="md"
+                  p="sm"
                 >
-                  Copy
-                </Button>
-              </Group>
-              <Code block className="details-code-cell">
-                {commandCue.icommand}
-              </Code>
-            </Stack>
-          ) : null}
+                  <Stack gap="sm">
+                    {cue.operation?.trim() ? (
+                      <Group gap="xs">
+                        <Badge variant="light" color="blue">
+                          {cue.operation}
+                        </Badge>
+                      </Group>
+                    ) : null}
 
-          {commandCue?.gocmd?.trim() ? (
-            <Stack gap="xs">
-              <Group justify="space-between" align="center">
-                <Text size="sm" fw={600}>
-                  goCmd
-                </Text>
-                <Button
-                  size="xs"
-                  variant="subtle"
-                  leftSection={<IconCopy size={14} />}
-                  onClick={() => void copyText(commandCue.gocmd!, 'goCmd')}
-                >
-                  Copy
-                </Button>
-              </Group>
-              <Code block className="details-code-cell">
-                {commandCue.gocmd}
-              </Code>
-            </Stack>
-          ) : null}
+                    {cue.icommand?.trim() ? (
+                      <Stack gap="xs">
+                        <Group justify="space-between" align="center">
+                          <Text size="sm" fw={600}>
+                            iCommand
+                          </Text>
+                          <Button
+                            size="xs"
+                            variant="subtle"
+                            leftSection={<IconCopy size={14} />}
+                            onClick={() => void copyText(cue.icommand!, `iCommand (${cue.operation ?? index + 1})`)}
+                          >
+                            Copy command
+                          </Button>
+                        </Group>
+                        <Code block className="details-code-cell">
+                          {cue.icommand}
+                        </Code>
+                      </Stack>
+                    ) : null}
 
-          {!commandCue?.icommand?.trim() && !commandCue?.gocmd?.trim() ? (
+                    {cue.gocmd?.trim() ? (
+                      <Stack gap="xs">
+                        <Group justify="space-between" align="center">
+                          <Text size="sm" fw={600}>
+                            goCmd
+                          </Text>
+                          <Button
+                            size="xs"
+                            variant="subtle"
+                            leftSection={<IconCopy size={14} />}
+                            onClick={() => void copyText(cue.gocmd!, `goCmd (${cue.operation ?? index + 1})`)}
+                          >
+                            Copy command
+                          </Button>
+                        </Group>
+                        <Code block className="details-code-cell">
+                          {cue.gocmd}
+                        </Code>
+                      </Stack>
+                    ) : null}
+                  </Stack>
+                </Paper>
+              ))}
+            </Stack>
+          ) : (
             <Text size="sm" c="dimmed">
               No command hints are available for this path.
             </Text>
-          ) : null}
+          )}
+
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setCommandHintsOpened(false)}>
+              Close
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={storageCommandDetailsOpened}
+        onClose={() => setStorageCommandDetailsOpened(false)}
+        title="Storage command details"
+        centered
+        size="lg"
+      >
+        <Stack gap="md">
+          <Text size="sm" c="dimmed">
+            Build iCommand examples for {isCollection ? 'collection' : 'data object'} replica operations.
+          </Text>
+
+          <Group align="flex-end" grow>
+            <Select
+              label="Source resource"
+              placeholder="Select source resource"
+              data={topResourceOptions}
+              value={storageCommandSourceResource || null}
+              onChange={(value) => setStorageCommandSourceResource(value ?? '')}
+              searchable
+              allowDeselect={false}
+              disabled={resourcesQuery.isLoading}
+            />
+            <Select
+              label="Destination resource"
+              placeholder="Select destination resource"
+              data={topResourceOptions}
+              value={storageCommandDestinationResource || null}
+              onChange={(value) => setStorageCommandDestinationResource(value ?? '')}
+              searchable
+              allowDeselect={false}
+              disabled={resourcesQuery.isLoading}
+            />
+          </Group>
+
+          <Paper withBorder radius="md" p="sm">
+            <Stack gap="xs">
+              <Group justify="space-between" align="center">
+                <Badge variant="light" color="blue">
+                  Phymove
+                </Badge>
+                <Button
+                  size="xs"
+                  variant="subtle"
+                  leftSection={<IconCopy size={14} />}
+                  onClick={() => void copyText(phyMoveCommand, 'Phymove command')}
+                >
+                  Copy command
+                </Button>
+              </Group>
+              <Code block className="details-code-cell">
+                {phyMoveCommand}
+              </Code>
+            </Stack>
+          </Paper>
+
+          <Paper withBorder radius="md" p="sm">
+            <Stack gap="xs">
+              <Group justify="space-between" align="center">
+                <Badge variant="light" color="teal">
+                  Replicate
+                </Badge>
+                <Button
+                  size="xs"
+                  variant="subtle"
+                  leftSection={<IconCopy size={14} />}
+                  onClick={() => void copyText(replicateCommand, 'Replicate command')}
+                >
+                  Copy command
+                </Button>
+              </Group>
+              <Code block className="details-code-cell">
+                {replicateCommand}
+              </Code>
+            </Stack>
+          </Paper>
+
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setStorageCommandDetailsOpened(false)}>
+              Close
+            </Button>
+          </Group>
         </Stack>
       </Modal>
 
@@ -2067,7 +2222,7 @@ export function ExplorerDetailsPage() {
                 <Tabs defaultValue="overview" keepMounted={false}>
                   <Tabs.List grow>
                     <Tabs.Tab value="overview">Overview</Tabs.Tab>
-                    {isDataObject ? <Tabs.Tab value="storage">Storage</Tabs.Tab> : null}
+                    {isDataObject || isCollection ? <Tabs.Tab value="storage">Storage</Tabs.Tab> : null}
                     <Tabs.Tab value="avus">AVUs</Tabs.Tab>
                     <Tabs.Tab value="permissions">Permissions</Tabs.Tab>
                     <Tabs.Tab value="tickets">Tickets</Tabs.Tab>
@@ -2157,15 +2312,26 @@ export function ExplorerDetailsPage() {
                     </Card>
                   </Tabs.Panel>
 
-                  {isDataObject ? (
+                  {isDataObject || isCollection ? (
                     <Tabs.Panel value="storage" pt="md">
+                      {isDataObject ? (
                       <Card shadow="sm" radius="xl" padding="lg">
                         <Stack gap="sm">
-                          <Group gap="xs">
-                            <ThemeIcon variant="light" color="gray" size="md">
-                              <IconBinaryTree2 size={14} />
-                            </ThemeIcon>
-                            <Title order={4}>Storage Detail</Title>
+                          <Group justify="space-between" align="center">
+                            <Group gap="xs">
+                              <ThemeIcon variant="light" color="gray" size="md">
+                                <IconBinaryTree2 size={14} />
+                              </ThemeIcon>
+                              <Title order={4}>Storage Detail</Title>
+                            </Group>
+                            <Button
+                              size="xs"
+                              variant="default"
+                              leftSection={<IconTerminal2 size={14} />}
+                              onClick={() => setStorageCommandDetailsOpened(true)}
+                            >
+                              Command details
+                            </Button>
                           </Group>
                           <InfoRow
                             label="Replica count"
@@ -2380,6 +2546,28 @@ export function ExplorerDetailsPage() {
                           )}
                         </Stack>
                       </Card>
+                      ) : (
+                        <Card shadow="sm" radius="xl" padding="lg">
+                          <Stack gap="sm">
+                            <Group justify="space-between" align="center">
+                              <Group gap="xs">
+                                <ThemeIcon variant="light" color="gray" size="md">
+                                  <IconBinaryTree2 size={14} />
+                                </ThemeIcon>
+                                <Title order={4}>Storage Detail</Title>
+                              </Group>
+                              <Button
+                                size="xs"
+                                variant="default"
+                                leftSection={<IconTerminal2 size={14} />}
+                                onClick={() => setStorageCommandDetailsOpened(true)}
+                              >
+                                Command details
+                              </Button>
+                            </Group>
+                          </Stack>
+                        </Card>
+                      )}
                     </Tabs.Panel>
                   ) : null}
 

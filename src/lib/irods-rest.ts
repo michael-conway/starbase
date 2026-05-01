@@ -53,7 +53,7 @@ export interface PathEntry {
   path: string
   kind: 'data_object' | 'collection'
   zone: string
-  cmd_cue?: PathCommandCue
+  cmd_cues?: PathCommandCue[]
   mime_type?: string
   display_size?: string
   created_at?: string
