@@ -12,6 +12,7 @@ import '@mantine/core/styles.css'
 import '@mantine/notifications/styles.css'
 import './index.css'
 import { router } from './router'
+import { AppConfigProvider } from './providers/app-config'
 import { SessionProvider } from './providers/session'
 import { UploadProvider } from './providers/upload-provider'
 import { ApiError } from './lib/irods-rest'
@@ -66,11 +67,13 @@ createRoot(document.getElementById('root')!).render(
     <QueryClientProvider client={queryClient}>
       <MantineProvider theme={theme} cssVariablesResolver={resolver} defaultColorScheme="light">
         <Notifications position="top-right" />
-        <SessionProvider>
-          <UploadProvider>
-            <RouterProvider router={router} />
-          </UploadProvider>
-        </SessionProvider>
+        <AppConfigProvider>
+          <SessionProvider>
+            <UploadProvider>
+              <RouterProvider router={router} />
+            </UploadProvider>
+          </SessionProvider>
+        </AppConfigProvider>
       </MantineProvider>
     </QueryClientProvider>
   </StrictMode>,

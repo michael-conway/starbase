@@ -4,6 +4,7 @@ import type { AuthMode, RequestAuth } from '../lib/irods-rest'
 export interface StoredPreferences {
   authMode: AuthMode
   baseUrl: string
+  basicAuthType: string
 }
 
 export interface SessionContextValue {
@@ -15,7 +16,12 @@ export interface SessionContextValue {
   preferences: StoredPreferences
   oidcToken: string
   basicUsername: string
-  signInBasic: (input: { username: string; password: string; baseUrl: string }) => void
+  signInBasic: (input: {
+    username: string
+    password: string
+    baseUrl: string
+    basicAuthType: string
+  }) => void
   signInOidc: (input: { token: string; baseUrl: string }) => void
   updateBaseUrl: (baseUrl: string) => void
   setPreferredAuthMode: (mode: AuthMode) => void

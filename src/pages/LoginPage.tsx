@@ -1,6 +1,10 @@
-import { useState } from 'react'
+import {
+  useMemo,
+  useState,
+} from 'react'
 import { Navigate } from 'react-router-dom'
 import {
+  Alert,
   Badge,
   Button,
   Card,
@@ -8,6 +12,7 @@ import {
   Grid,
   Group,
   PasswordInput,
+  Select,
   SegmentedControl,
   Stack,
   Text,
@@ -19,9 +24,11 @@ import {
   IconLock,
 } from '@tabler/icons-react'
 import type { AuthMode } from '../lib/irods-rest'
+import { useAppConfig } from '../providers/use-app-config'
 import { useSession } from '../providers/use-session'
 
 export function LoginPage() {
+  const appConfig = useAppConfig()
   const {
     isAuthenticated,
     preferences,
@@ -31,9 +38,22 @@ export function LoginPage() {
   } = useSession()
   const [mode, setMode] = useState<AuthMode>(preferences.authMode)
   const [baseUrl, setBaseUrl] = useState(preferences.baseUrl)
+  const [basicAuthType, setBasicAuthType] = useState(preferences.basicAuthType)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [token, setToken] = useState('')
+  const basicAuthOptions = useMemo(
+    () =>
+      appConfig.config.authModes.map((option) => ({
+        value: option.mode,
+        label: option.authName,
+      })),
+    [appConfig.config.authModes],
+  )
+  const effectiveBasicAuthType =
+    basicAuthOptions.some((option) => option.value === basicAuthType) && basicAuthType
+      ? basicAuthType
+      : (basicAuthOptions[0]?.value ?? 'native')
 
   if (isAuthenticated) {
     return <Navigate to="/app/explorer" replace />
@@ -81,8 +101,25 @@ export function LoginPage() {
                   onChange={(event) => setBaseUrl(event.currentTarget.value)}
                 />
 
+                {appConfig.error ? (
+                  <Alert color="yellow" variant="light" title="Config load warning">
+                    {appConfig.error}
+                  </Alert>
+                ) : null}
+
                 {mode === 'basic' ? (
                   <Stack gap="md">
+                    <Select
+                      label="Auth type"
+                      value={effectiveBasicAuthType}
+                      onChange={(value) => {
+                        if (value) {
+                          setBasicAuthType(value)
+                        }
+                      }}
+                      data={basicAuthOptions}
+                      allowDeselect={false}
+                    />
                     <TextInput
                       label="Username"
                       placeholder="rods"
@@ -102,6 +139,7 @@ export function LoginPage() {
                           username,
                           password,
                           baseUrl,
+                          basicAuthType: effectiveBasicAuthType,
                         })
                       }
                     >

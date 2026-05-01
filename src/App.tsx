@@ -28,6 +28,7 @@ import {
 import { primarySections } from './app-sections'
 import { defaultPath } from './features/explorer'
 import { getFavorites, getHealth, getServiceInfo } from './lib/irods-rest'
+import { useAppConfig } from './providers/use-app-config'
 import { useSession } from './providers/use-session'
 
 function userFromOIDCToken(token: string) {
@@ -97,6 +98,7 @@ function asObject(value: unknown): Record<string, unknown> {
 }
 
 function App() {
+  const appConfig = useAppConfig()
   const { basicUsername, clearSession, connection, isAuthenticated, oidcToken } = useSession()
   const location = useLocation()
   const [menuOpened, setMenuOpened] = useState(false)
@@ -125,6 +127,8 @@ function App() {
       : userFromOIDCToken(oidcToken) || 'OIDC user'
   const currentZone = zoneFromSearch(location.search)
   const authModeLabel = connection.auth.mode === 'basic' ? 'Basic auth' : 'OIDC'
+  const appTitle = appConfig.config.title?.trim() || 'Starbase'
+  const appSubtitle = appConfig.config.subtitle?.trim() || 'iRODS Explorer'
   const servicePayload = asObject(serviceInfoQuery.data)
   const serverInfo = asObject(servicePayload.server_info)
   const normalizedServerInfo = Object.keys(serverInfo).length > 0 ? serverInfo : servicePayload
@@ -319,10 +323,10 @@ function App() {
                   size="sm"
                   aria-label={menuOpened ? 'Hide main menu' : 'Show main menu'}
                 />
-                <Title order={2}>starbase</Title>
+                <Title order={2}>{appTitle}</Title>
               </Group>
               <Text size="sm" c="dimmed">
-                iRODS Explorer
+                {appSubtitle}
               </Text>
             </div>
 
@@ -443,7 +447,7 @@ function App() {
               Workspace
             </Text>
             <Text size="sm" mt={4}>
-              iRODS Explorer
+              {appSubtitle}
             </Text>
           </div>
 

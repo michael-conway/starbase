@@ -365,6 +365,7 @@ export interface RequestAuth {
   mode: AuthMode
   username?: string
   password?: string
+  basicAuthType?: string
   token?: string
 }
 

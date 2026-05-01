@@ -1,0 +1,8 @@
+Title: Starbase
+Subtitle: iRODS Explorer
+
+AuthMode:
+  - Mode: native
+    AuthName: irods auth
+  - Mode: pam
+    AuthName: pam auth

@@ -4,6 +4,7 @@ import {
   Badge,
   Button,
   Card,
+  Drawer,
   Group,
   Modal,
   Progress,
@@ -16,6 +17,7 @@ import { notifications } from '@mantine/notifications'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   IconCircleCheck,
+  IconChevronUp,
   IconLoader2,
   IconUpload,
   IconX,
@@ -75,7 +77,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   const [checksumRequired, setChecksumRequired] = useState(false)
   const [uploads, setUploads] = useState<UploadItem[]>([])
   const [overwritePrompt, setOverwritePrompt] = useState<OverwritePromptState | null>(null)
-  const [dockCollapsed, setDockCollapsed] = useState(false)
+  const [uploadDrawerOpened, setUploadDrawerOpened] = useState(false)
 
   const countUploading = () =>
     uploads.filter((upload) => upload.status === 'uploading').length
@@ -235,7 +237,6 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       total: file.size,
     }))
 
-    setDockCollapsed(false)
     setUploads((current) => [...current, ...nextUploads])
 
     setPendingSelection(null)
@@ -263,7 +264,13 @@ export function UploadProvider({ children }: { children: ReactNode }) {
 
   const dismissUpload = (uploadId: string) => {
     controllersRef.current.delete(uploadId)
-    setUploads((current) => current.filter((item) => item.id !== uploadId))
+    setUploads((current) => {
+      const next = current.filter((item) => item.id !== uploadId)
+      if (next.length === 0) {
+        setUploadDrawerOpened(false)
+      }
+      return next
+    })
   }
 
   const cancelOverwritePrompt = () => {
@@ -415,115 +422,133 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       </Modal>
 
       {uploads.length > 0 ? (
-        <Card shadow="sm" radius="xl" padding="lg" className="upload-dock">
-          <Stack gap="sm">
+        <>
+          <Card
+            shadow="sm"
+            radius="xl"
+            padding="sm"
+            className="upload-footer"
+            withBorder
+          >
             <Group justify="space-between" wrap="nowrap">
-              <Button
-                variant="subtle"
-                color="gray"
-                px={0}
-                onClick={() => setDockCollapsed((current) => !current)}
-              >
-                {dockCollapsed ? 'Show uploads' : 'Hide uploads'}
-              </Button>
-              <Group gap="xs">
-                <Title order={4}>Uploads</Title>
+              <Group gap="xs" wrap="nowrap">
+                <Title order={6}>Uploads</Title>
                 <Badge variant="light" color="blue">
                   {countUploading()} active
                 </Badge>
+                <Badge variant="dot" color="gray">
+                  {uploads.length} total
+                </Badge>
               </Group>
+              <Button
+                size="xs"
+                variant="subtle"
+                rightSection={<IconChevronUp size={14} />}
+                onClick={() => setUploadDrawerOpened(true)}
+              >
+                Open
+              </Button>
             </Group>
+          </Card>
 
-            {!dockCollapsed
-              ? uploads.map((upload) => {
-              const progress = upload.total > 0 ? Math.round((upload.loaded / upload.total) * 100) : 0
-              return (
-                <Stack key={upload.id} gap={6} className="upload-dock-item">
-                  <Group justify="space-between" align="flex-start" gap="sm">
-                    <div>
-                      <Text size="sm" fw={600}>
-                        {upload.file.name}
-                      </Text>
+          <Drawer
+            opened={uploadDrawerOpened}
+            onClose={() => setUploadDrawerOpened(false)}
+            title="Uploads"
+            position="bottom"
+            size="md"
+            className="upload-drawer"
+          >
+            <Stack gap="sm" className="upload-drawer-body">
+              {uploads.map((upload) => {
+                const progress = upload.total > 0 ? Math.round((upload.loaded / upload.total) * 100) : 0
+                return (
+                  <Stack key={upload.id} gap={6} className="upload-dock-item">
+                    <Group justify="space-between" align="flex-start" gap="sm">
+                      <div>
+                        <Text size="sm" fw={600}>
+                          {upload.file.name}
+                        </Text>
+                        <Text size="xs" c="dimmed">
+                          {upload.targetPath}
+                        </Text>
+                      </div>
+                      <Group gap={4}>
+                        {upload.status === 'success' ? (
+                          <ActionIcon variant="subtle" color="teal" aria-label="Upload complete">
+                            <IconCircleCheck size={16} />
+                          </ActionIcon>
+                        ) : upload.status === 'uploading' ? (
+                          <ActionIcon
+                            variant="subtle"
+                            color="gray"
+                            aria-label="Uploading"
+                            disabled
+                          >
+                            <IconLoader2 size={16} className="upload-spinner" />
+                          </ActionIcon>
+                        ) : null}
+                        {upload.status === 'queued' || upload.status === 'uploading' ? (
+                          <ActionIcon
+                            variant="subtle"
+                            color="red"
+                            aria-label={`Cancel upload for ${upload.file.name}`}
+                            onClick={() => cancelUpload(upload.id)}
+                          >
+                            <IconX size={16} />
+                          </ActionIcon>
+                        ) : (
+                          <ActionIcon
+                            variant="subtle"
+                            color="gray"
+                            aria-label={`Dismiss upload for ${upload.file.name}`}
+                            onClick={() => dismissUpload(upload.id)}
+                          >
+                            <IconX size={16} />
+                          </ActionIcon>
+                        )}
+                      </Group>
+                    </Group>
+
+                    <Progress
+                      value={
+                        upload.status === 'success'
+                          ? 100
+                          : upload.status === 'cancelled'
+                            ? 0
+                            : progress
+                      }
+                      color={
+                        upload.status === 'error'
+                          ? 'red'
+                          : upload.status === 'success'
+                            ? 'teal'
+                            : upload.status === 'awaiting_overwrite'
+                              ? 'yellow'
+                              : 'blue'
+                      }
+                    />
+
+                    <Group justify="space-between">
                       <Text size="xs" c="dimmed">
-                        {upload.targetPath}
+                        {upload.status}
                       </Text>
-                    </div>
-                    <Group gap={4}>
-                      {upload.status === 'success' ? (
-                        <ActionIcon variant="subtle" color="teal" aria-label="Upload complete">
-                          <IconCircleCheck size={16} />
-                        </ActionIcon>
-                      ) : upload.status === 'uploading' ? (
-                        <ActionIcon
-                          variant="subtle"
-                          color="gray"
-                          aria-label="Uploading"
-                          disabled
-                        >
-                          <IconLoader2 size={16} className="upload-spinner" />
-                        </ActionIcon>
-                      ) : null}
-                      {upload.status === 'queued' || upload.status === 'uploading' ? (
-                        <ActionIcon
-                          variant="subtle"
-                          color="red"
-                          aria-label={`Cancel upload for ${upload.file.name}`}
-                          onClick={() => cancelUpload(upload.id)}
-                        >
-                          <IconX size={16} />
-                        </ActionIcon>
+                      {upload.error ? (
+                        <Text size="xs" c="red">
+                          {upload.error}
+                        </Text>
                       ) : (
-                        <ActionIcon
-                          variant="subtle"
-                          color="gray"
-                          aria-label={`Dismiss upload for ${upload.file.name}`}
-                          onClick={() => dismissUpload(upload.id)}
-                        >
-                          <IconX size={16} />
-                        </ActionIcon>
+                        <Text size="xs" c="dimmed">
+                          {upload.total > 0 ? `${progress}%` : 'Pending'}
+                        </Text>
                       )}
                     </Group>
-                  </Group>
-
-                  <Progress
-                    value={
-                      upload.status === 'success'
-                        ? 100
-                        : upload.status === 'cancelled'
-                          ? 0
-                          : progress
-                    }
-                    color={
-                      upload.status === 'error'
-                        ? 'red'
-                        : upload.status === 'success'
-                          ? 'teal'
-                          : upload.status === 'awaiting_overwrite'
-                            ? 'yellow'
-                          : 'blue'
-                    }
-                  />
-
-                  <Group justify="space-between">
-                    <Text size="xs" c="dimmed">
-                      {upload.status}
-                    </Text>
-                    {upload.error ? (
-                      <Text size="xs" c="red">
-                        {upload.error}
-                      </Text>
-                    ) : (
-                      <Text size="xs" c="dimmed">
-                        {upload.total > 0 ? `${progress}%` : 'Pending'}
-                      </Text>
-                    )}
-                  </Group>
-                </Stack>
-              )
-            })
-              : null}
-          </Stack>
-        </Card>
+                  </Stack>
+                )
+              })}
+            </Stack>
+          </Drawer>
+        </>
       ) : null}
     </UploadManagerContext.Provider>
   )

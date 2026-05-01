@@ -2400,11 +2400,24 @@ export function ExplorerDetailsPage() {
       <Card shadow="sm" radius="xl" padding="lg">
         <Stack gap="md">
           <Group justify="space-between" align="center">
-            <div>
+            <Group gap="sm" align="center">
+              {detailsQuery.data ? (
+                <ThemeIcon
+                  variant="light"
+                  color={detailsQuery.data.kind === 'collection' ? 'blue' : 'teal'}
+                  size="lg"
+                >
+                  {detailsQuery.data.kind === 'collection' ? (
+                    <IconFolder size={18} />
+                  ) : (
+                    <IconFile size={18} />
+                  )}
+                </ThemeIcon>
+              ) : null}
               <Title order={2}>
-                {detailsQuery.data?.kind === 'collection' ? 'Folder details' : 'File details'}
+                {detailsQuery.data ? displayName(detailsQuery.data.path) : 'Details'}
               </Title>
-            </div>
+            </Group>
 
             <Button
               variant="subtle"
@@ -2459,29 +2472,11 @@ export function ExplorerDetailsPage() {
                   <Stack gap="md">
                     <Group justify="space-between" align="flex-start">
                       <Group gap="sm" align="flex-start" className="details-header-main">
-                        <ThemeIcon
-                          variant="light"
-                          color={detailsQuery.data.kind === 'collection' ? 'blue' : 'teal'}
-                          size="xl"
-                        >
-                          {detailsQuery.data.kind === 'collection' ? (
-                            <IconFolder size={20} />
-                          ) : (
-                            <IconFile size={20} />
-                          )}
-                        </ThemeIcon>
                         <Group
                           justify="space-between"
                           align="flex-start"
                           className="details-header-copy"
                         >
-                          <div>
-                            <Title order={3}>{displayName(detailsQuery.data.path)}</Title>
-                            <Text c="dimmed">
-                              {detailsQuery.data.parent?.irods_path ?? 'Path root'}
-                            </Text>
-                          </div>
-
                           <Group gap="xs">
                             <Badge variant="light" color="blue">
                               {detailsQuery.data.kind}

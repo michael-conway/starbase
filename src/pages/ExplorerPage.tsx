@@ -22,7 +22,6 @@ import {
   Text,
   TextInput,
   ThemeIcon,
-  Title,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useMutation, useQuery } from '@tanstack/react-query'
@@ -1339,19 +1338,6 @@ export function ExplorerPage() {
         }}
       >
         <Stack gap="md">
-          <Group justify="space-between" align="center">
-            <div>
-              <Title order={2}>iRODS Explorer</Title>
-            </div>
-            {entry ? (
-              <Group gap="xs">
-                <Badge variant="light" color="blue">
-                  {entry.kind}
-                </Badge>
-              </Group>
-            ) : null}
-          </Group>
-
           <Breadcrumbs>
             {breadcrumbs.map((crumb) => (
               <Button
