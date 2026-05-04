@@ -1,0 +1,15 @@
+.git
+.github
+.idea
+.ai
+node_modules
+dist
+dist-ssr
+coverage
+logs
+*.log
+*.local
+.DS_Store
+Dockerfile
+README.md
+DEVELOPER_NOTES.md
