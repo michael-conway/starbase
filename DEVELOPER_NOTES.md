@@ -89,52 +89,6 @@ When a frontend feature is proposed, ask:
 * what complexity is currently being carried in the UI that should be pushed up
   into `irods-go-rest` instead?
 
-### Development Plan
-
-Current product focus:
-
-* first-open login
-* focused explorer workspace
-* setup guidance for the local stack
-
-Frontend feature plan:
-
-1. Mature the Drive-like explorer layout
-2. Add real upload and replace-object workflows
-3. Add collection creation from the browser
-4. Add metadata editing in the details pane
-5. Add delete flows for objects and collections
-6. Add ACL inspection and editing
-7. Reassess search, rules, and admin only after the browser flow is solid
-
-Backend route plan to support that sequence:
-
-1. `POST /api/v1/path/contents?irods_path=...`
-   Purpose: upload new contents or replace an existing object
-2. `POST /api/v1/path?irods_path=...`
-   Purpose: create a child collection beneath a collection path
-3. `PATCH /api/v1/path?irods_path=...`
-   Purpose: rename a file or collection in place within its current parent collection
-4. `GET /api/v1/path/metadata?irods_path=...`
-   Purpose: retrieve metadata as an explicit subresource
-5. `PUT /api/v1/path/metadata?irods_path=...`
-   Purpose: add or update metadata
-6. `DELETE /api/v1/path/metadata?irods_path=...`
-   Purpose: remove metadata entries
-7. `DELETE /api/v1/path?irods_path=...`
-   Purpose: delete a collection or object by canonical path
-8. `GET /api/v1/path/acl?irods_path=...`
-   Purpose: inspect access controls
-9. `PUT /api/v1/path/acl?irods_path=...`
-   Purpose: update access controls
-
-Lower-priority backend exploration:
-
-* `POST /api/v1/path/actions/copy`
-* preview-oriented routes for browser rendering
-* search routes under a separate query-oriented namespace rather than forcing
-  search into `/path`
-
 # Starbase Developer Notes
 
 ## Overview
@@ -142,16 +96,6 @@ Lower-priority backend exploration:
 This document records architecture, workflow, and implementation notes for
 `starbase`, the React frontend for `irods-go-rest`.
 
-## Current Product Slice
-
-The active starter is intentionally focused on three user-facing areas:
-
-* login
-* explorer
-* setup
-
-This is a deliberate product decision. The goal is to make the first-use
-experience coherent before expanding into broader operator surfaces.
 
 ## Current Architecture
 
@@ -178,13 +122,6 @@ The backend currently defines:
 * browser login flow under `/web/*`
 * iRODS integration behavior
 
-The frontend currently consumes:
-
-* `GET /healthz`
-* `GET /api/v1/path?irods_path=...`
-* `GET /api/v1/path/children?irods_path=...`
-* `GET /api/v1/path/contents?irods_path=...`
-
 If the backend contract changes, `src/lib/irods-rest.ts` and the explorer
 workflows should be updated to match rather than inventing a parallel frontend
 resource model.
@@ -208,7 +145,7 @@ code.
 
 ## Explorer Design Notes
 
-The explorer should evolve toward a Drive-like iRODS browser.
+The explorer is intended to be a Drive-like iRODS browser.
 
 Current priorities:
 
@@ -302,11 +239,7 @@ docker compose up
 
 Then run `irods-go-rest` and `starbase` separately against that shared stack.
 
-## Legacy Notes Incorporated
-
-The older `DEV_NOTES.md` content is intentionally merged into this file.
-
-Useful local references:
+## Developer Links
 
 * [README.md](./README.md): project overview, setup, and environment notes
 * [src/main.tsx](./src/main.tsx): app bootstrapping, theme, notifications, and query setup
