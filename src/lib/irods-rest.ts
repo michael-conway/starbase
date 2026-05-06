@@ -307,6 +307,24 @@ export interface FavoriteCollectionResponse {
   links?: FavoriteCollectionLinks
 }
 
+export interface S3BucketLinks {
+  self?: ActionLink
+  path?: ActionLink
+  details?: ActionLink
+  update?: ActionLink
+  delete?: ActionLink
+}
+
+export interface S3Bucket {
+  bucket_id: string
+  irods_path: string
+  links?: S3BucketLinks
+}
+
+export interface S3BucketResponse {
+  bucket: S3Bucket
+}
+
 function validateFavoriteCollectionResponse(
   response: FavoriteCollectionResponse,
 ): FavoriteCollectionResponse {
@@ -599,6 +617,71 @@ export function getFavorites(auth: RequestAuth, baseUrl?: string) {
     auth,
     baseUrl,
   }).then((response) => validateFavoriteCollectionResponse(response))
+}
+
+export function getS3BucketByPath(irodsPath: string, auth: RequestAuth, baseUrl?: string) {
+  const params = new URLSearchParams({
+    irods_path: requireAbsolutePath(irodsPath, 'irods_path'),
+  })
+
+  return request<S3BucketResponse>(`/api/v1/ext/s3/buckets/by-path?${params.toString()}`, {
+    auth,
+    baseUrl,
+  })
+}
+
+export function upsertS3Bucket(
+  payload: {
+    irods_path: string
+    bucket_name?: string
+    auto_generate?: boolean
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+  method: 'POST' | 'PUT' = 'POST',
+) {
+  const requestPayload = {
+    irods_path: requireAbsolutePath(payload.irods_path, 'irods_path'),
+    bucket_name: payload.bucket_name?.trim() || undefined,
+    auto_generate: Boolean(payload.auto_generate),
+  }
+
+  return request<S3BucketResponse>('/api/v1/ext/s3/buckets', {
+    auth,
+    baseUrl,
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(requestPayload),
+  })
+}
+
+export async function deleteS3Bucket(bucketId: string, auth: RequestAuth, baseUrl?: string) {
+  const normalizedBucketId = bucketId.trim()
+  if (!normalizedBucketId) {
+    throw new ApiError(400, 'bucket_id is required.')
+  }
+
+  const response = await fetch(
+    buildUrl(`/api/v1/ext/s3/buckets/${encodeURIComponent(normalizedBucketId)}`, baseUrl),
+    {
+      method: 'DELETE',
+      headers: buildHeaders(auth),
+    },
+  )
+
+  if (!response.ok) {
+    let payload: ApiErrorPayload | null = null
+
+    try {
+      payload = (await response.json()) as ApiErrorPayload
+    } catch {
+      // Fall back to the HTTP status when the response body is not JSON.
+    }
+
+    throw buildApiError(response.status, payload)
+  }
 }
 
 export function addFavorite(

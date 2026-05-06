@@ -13,6 +13,7 @@ import {
   Divider,
   Group,
   Loader,
+  Menu,
   Modal,
   Paper,
   Select,
@@ -68,12 +69,14 @@ import {
   deletePathByAction,
   deleteTicket,
   downloadPath,
+  deleteS3Bucket,
   getPath,
   getPathChildren,
   getPathACL,
   getPathAVUs,
   getFavorites,
   getResources,
+  getS3BucketByPath,
   searchGroups,
   searchUsers,
   getTickets,
@@ -90,10 +93,13 @@ import {
   type ActionLink,
   type FavoriteEntry,
   type PathEntry,
+  type S3Bucket,
   type TicketEntry,
   updatePathACL,
   updateTicket,
+  upsertS3Bucket,
 } from '../lib/irods-rest'
+import { useAppConfig } from '../providers/use-app-config'
 import { useSession } from '../providers/use-session'
 import { useUploadManager } from '../providers/upload-context'
 
@@ -117,6 +123,12 @@ interface RelocateDialogState {
   operation: RelocateOperation
   browsePath: string
   destinationPathDraft: string
+}
+
+interface S3BucketDialogState {
+  mode: 'add' | 'update'
+  path: string
+  currentBucketId?: string
 }
 
 interface ACLFormState {
@@ -267,6 +279,21 @@ function normalizeCollectionPath(path: string) {
   }
 
   return trimmed.replace(/\/+$/, '')
+}
+
+function defaultS3BucketNameForPath(irodsPath: string) {
+  const normalized = displayName(irodsPath)
+    .toLowerCase()
+    .replace(/[^a-z0-9.-]+/g, '-')
+    .replace(/^[^a-z0-9]+/, '')
+    .replace(/[^a-z0-9]+$/, '')
+    .replace(/-{2,}/g, '-')
+
+  if (normalized.length >= 3) {
+    return normalized.slice(0, 63)
+  }
+
+  return ''
 }
 
 function destinationPathForSource(sourcePath: string, destinationCollectionPath: string) {
@@ -451,9 +478,11 @@ function collectionInheritanceAction(
 }
 
 export function ExplorerDetailsPage() {
+  const appConfig = useAppConfig()
   const { connection } = useSession()
   const { openFilePicker } = useUploadManager()
   const navigate = useNavigate()
+  const s3AdminEnabled = appConfig.config.s3AdminEnabled
   const [searchParams] = useSearchParams()
   const irodsPath = searchParams.get('irods_path')?.trim() ?? ''
   const explorerQuery = searchParams.get('explorer_query')?.trim() ?? ''
@@ -498,6 +527,10 @@ export function ExplorerDetailsPage() {
   const [deleteDialog, setDeleteDialog] = useState<DeleteDialogState | null>(null)
   const [deleteForce, setDeleteForce] = useState(false)
   const [renameDialog, setRenameDialog] = useState<RenameDialogState | null>(null)
+  const [s3BucketDialog, setS3BucketDialog] = useState<S3BucketDialogState | null>(null)
+  const [s3BucketName, setS3BucketName] = useState('')
+  const [s3BucketAutoGenerate, setS3BucketAutoGenerate] = useState(false)
+  const [s3BucketDeleteDialog, setS3BucketDeleteDialog] = useState<S3Bucket | null>(null)
   const [relocateDialog, setRelocateDialog] = useState<RelocateDialogState | null>(null)
   const [renameName, setRenameName] = useState('')
   const [commandHintsOpened, setCommandHintsOpened] = useState(false)
@@ -563,6 +596,20 @@ export function ExplorerDetailsPage() {
     queryKey: ['path-avus', irodsPath, connection],
     queryFn: () => getPathAVUs(irodsPath, connection.auth, connection.baseUrl),
     enabled: Boolean(irodsPath),
+  })
+  const s3BucketQuery = useQuery({
+    queryKey: ['s3-bucket-by-path', irodsPath, connection, s3AdminEnabled],
+    queryFn: async () => {
+      try {
+        return (await getS3BucketByPath(irodsPath, connection.auth, connection.baseUrl)).bucket
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) {
+          return null
+        }
+        throw error
+      }
+    },
+    enabled: Boolean(s3AdminEnabled && irodsPath && detailsQuery.data?.kind === 'collection'),
   })
   const aclQuery = useQuery({
     queryKey: ['path-acls', irodsPath, connection],
@@ -727,6 +774,65 @@ export function ExplorerDetailsPage() {
     onError: (error: Error) => {
       notifications.show({
         title: 'AVU add failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+  const upsertS3BucketMutation = useMutation({
+    mutationFn: (input: {
+      irodsPath: string
+      bucketName?: string
+      autoGenerate?: boolean
+      mode: 'add' | 'update'
+    }) =>
+      upsertS3Bucket(
+        {
+          irods_path: input.irodsPath,
+          bucket_name: input.bucketName,
+          auto_generate: input.autoGenerate,
+        },
+        connection.auth,
+        connection.baseUrl,
+        input.mode === 'update' ? 'PUT' : 'POST',
+      ).then((payload) => ({
+        bucket: payload.bucket,
+        mode: input.mode,
+      })),
+    onSuccess: async ({ bucket, mode }) => {
+      notifications.show({
+        title: mode === 'add' ? 'S3 bucket mapping added' : 'S3 bucket mapping updated',
+        message: `${bucket.bucket_id} -> ${bucket.irods_path}`,
+        color: 'teal',
+      })
+      setS3BucketDialog(null)
+      setS3BucketName('')
+      setS3BucketAutoGenerate(false)
+      await Promise.all([s3BucketQuery.refetch(), avuQuery.refetch()])
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'S3 bucket mapping failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+  const deleteS3BucketMutation = useMutation({
+    mutationFn: (bucket: S3Bucket) =>
+      deleteS3Bucket(bucket.bucket_id, connection.auth, connection.baseUrl).then(() => bucket),
+    onSuccess: async (bucket) => {
+      notifications.show({
+        title: 'S3 bucket mapping deleted',
+        message: bucket.bucket_id,
+        color: 'teal',
+      })
+      setS3BucketDeleteDialog(null)
+      await Promise.all([s3BucketQuery.refetch(), avuQuery.refetch()])
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'S3 bucket mapping delete failed',
         message: error.message,
         color: 'red',
       })
@@ -1345,6 +1451,7 @@ export function ExplorerDetailsPage() {
   const hasCommandHints = commandCues.length > 0
   const isCollection = detailsQuery.data?.kind === 'collection'
   const isDataObject = detailsQuery.data?.kind === 'data_object'
+  const currentS3Bucket = s3BucketQuery.data ?? null
   const selectedReplicaMoveSourceResource = useMemo(() => {
     const current = replicaMoveSourceResource?.trim() ?? ''
     if (current && replicaResourceOptions.some((entry) => entry.value === current)) {
@@ -1519,6 +1626,72 @@ export function ExplorerDetailsPage() {
         },
       },
     )
+  }
+
+  const beginS3BucketAdd = () => {
+    const path = detailsQuery.data?.path
+    if (!path || detailsQuery.data?.kind !== 'collection') {
+      return
+    }
+
+    setS3BucketDialog({
+      mode: 'add',
+      path,
+    })
+    setS3BucketName(defaultS3BucketNameForPath(path))
+    setS3BucketAutoGenerate(false)
+  }
+
+  const beginS3BucketUpdate = () => {
+    const path = detailsQuery.data?.path
+    if (!path || detailsQuery.data?.kind !== 'collection' || !currentS3Bucket) {
+      return
+    }
+
+    setS3BucketDialog({
+      mode: 'update',
+      path,
+      currentBucketId: currentS3Bucket.bucket_id,
+    })
+    setS3BucketName(currentS3Bucket.bucket_id)
+    setS3BucketAutoGenerate(false)
+  }
+
+  const cancelS3BucketDialog = () => {
+    setS3BucketDialog(null)
+    setS3BucketName('')
+    setS3BucketAutoGenerate(false)
+  }
+
+  const submitS3BucketDialog = () => {
+    if (!s3BucketDialog) {
+      return
+    }
+
+    const bucketName = s3BucketName.trim()
+    if (!bucketName && !s3BucketAutoGenerate) {
+      notifications.show({
+        title: 'S3 bucket name is required',
+        message: 'Enter a bucket name or enable generated bucket name.',
+        color: 'red',
+      })
+      return
+    }
+
+    upsertS3BucketMutation.mutate({
+      irodsPath: s3BucketDialog.path,
+      bucketName: s3BucketAutoGenerate ? undefined : bucketName,
+      autoGenerate: s3BucketAutoGenerate,
+      mode: s3BucketDialog.mode,
+    })
+  }
+
+  const beginS3BucketDelete = () => {
+    if (!currentS3Bucket) {
+      return
+    }
+
+    setS3BucketDeleteDialog(currentS3Bucket)
   }
 
   const beginACLAdd = () => {
@@ -2095,6 +2268,111 @@ export function ExplorerDetailsPage() {
       </Modal>
 
       <Modal
+        opened={s3BucketDialog !== null}
+        onClose={() => {
+          if (!upsertS3BucketMutation.isPending) {
+            cancelS3BucketDialog()
+          }
+        }}
+        title={
+          s3BucketDialog?.mode === 'update'
+            ? 'Update S3 bucket mapping'
+            : 'Add S3 bucket mapping'
+        }
+        centered
+      >
+        <Stack gap="md">
+          <Text size="sm" c="dimmed">
+            Collection
+          </Text>
+          <Code className="details-inline-code">{s3BucketDialog?.path ?? ''}</Code>
+
+          {s3BucketDialog?.mode === 'update' && s3BucketDialog.currentBucketId ? (
+            <Text size="sm" c="dimmed">
+              Current bucket: <Code>{s3BucketDialog.currentBucketId}</Code>
+            </Text>
+          ) : null}
+
+          {s3BucketDialog?.mode === 'add' ? (
+            <Checkbox
+              label="Generate bucket name"
+              checked={s3BucketAutoGenerate}
+              onChange={(event) => setS3BucketAutoGenerate(event.currentTarget.checked)}
+            />
+          ) : null}
+
+          <TextInput
+            label="Bucket name"
+            value={s3BucketName}
+            onChange={(event) => setS3BucketName(event.currentTarget.value)}
+            disabled={s3BucketDialog?.mode === 'add' && s3BucketAutoGenerate}
+            autoFocus
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                submitS3BucketDialog()
+              }
+            }}
+          />
+
+          <Group justify="flex-end">
+            <Button
+              variant="default"
+              onClick={cancelS3BucketDialog}
+              disabled={upsertS3BucketMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={submitS3BucketDialog}
+              loading={upsertS3BucketMutation.isPending}
+            >
+              {s3BucketDialog?.mode === 'update' ? 'Update mapping' : 'Add mapping'}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={s3BucketDeleteDialog !== null}
+        onClose={() => {
+          if (!deleteS3BucketMutation.isPending) {
+            setS3BucketDeleteDialog(null)
+          }
+        }}
+        title="Delete S3 bucket mapping"
+        centered
+      >
+        <Stack gap="md">
+          <Text>
+            Delete S3 bucket mapping <strong>{s3BucketDeleteDialog?.bucket_id}</strong>?
+          </Text>
+          <Code className="details-inline-code">{s3BucketDeleteDialog?.irods_path ?? ''}</Code>
+
+          <Group justify="flex-end">
+            <Button
+              variant="default"
+              onClick={() => setS3BucketDeleteDialog(null)}
+              disabled={deleteS3BucketMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              color="red"
+              onClick={() => {
+                if (s3BucketDeleteDialog) {
+                  deleteS3BucketMutation.mutate(s3BucketDeleteDialog)
+                }
+              }}
+              loading={deleteS3BucketMutation.isPending}
+            >
+              Delete mapping
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
         opened={relocateDialog !== null}
         onClose={() => {
           if (!relocatePathMutation.isPending) {
@@ -2503,6 +2781,50 @@ export function ExplorerDetailsPage() {
                             >
                               Command hints
                             </Button>
+                            {s3AdminEnabled && isCollection ? (
+                              <Menu position="bottom-end" width={260} shadow="md">
+                                <Menu.Target>
+                                  <Button
+                                    size="xs"
+                                    variant="light"
+                                    leftSection={<IconDatabase size={14} />}
+                                  >
+                                    Tools
+                                  </Button>
+                                </Menu.Target>
+                                <Menu.Dropdown>
+                                  <Menu.Label>S3 bucket mapping</Menu.Label>
+                                  {s3BucketQuery.isLoading ? (
+                                    <Menu.Item disabled>Loading mapping...</Menu.Item>
+                                  ) : s3BucketQuery.isError ? (
+                                    <Menu.Item disabled>Mapping status unavailable</Menu.Item>
+                                  ) : currentS3Bucket ? (
+                                    <>
+                                      <Menu.Item
+                                        leftSection={<IconEdit size={14} />}
+                                        onClick={beginS3BucketUpdate}
+                                      >
+                                        Update S3 bucket mapping
+                                      </Menu.Item>
+                                      <Menu.Item
+                                        color="red"
+                                        leftSection={<IconTrash size={14} />}
+                                        onClick={beginS3BucketDelete}
+                                      >
+                                        Delete S3 bucket mapping
+                                      </Menu.Item>
+                                    </>
+                                  ) : (
+                                    <Menu.Item
+                                      leftSection={<IconPlus size={14} />}
+                                      onClick={beginS3BucketAdd}
+                                    >
+                                      Add S3 bucket mapping
+                                    </Menu.Item>
+                                  )}
+                                </Menu.Dropdown>
+                              </Menu>
+                            ) : null}
                           </Group>
                         </Group>
                       </Group>

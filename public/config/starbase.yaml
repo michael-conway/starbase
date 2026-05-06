@@ -1,5 +1,6 @@
 Title: Starbase
 Subtitle: iRODS Explorer
+S3AdminEnabled: true
 
 AuthMode:
   - Mode: native

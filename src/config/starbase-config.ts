@@ -7,6 +7,7 @@ export interface StarbaseConfig {
   title: string
   subtitle: string
   authModes: StarbaseAuthModeOption[]
+  s3AdminEnabled: boolean
 }
 
 export const defaultStarbaseConfig: StarbaseConfig = {
@@ -22,6 +23,7 @@ export const defaultStarbaseConfig: StarbaseConfig = {
       authName: 'pam auth',
     },
   ],
+  s3AdminEnabled: false,
 }
 
 function parseYamlScalar(value: string) {
@@ -163,16 +165,49 @@ function parseSubtitle(lines: string[]) {
   return defaultStarbaseConfig.subtitle
 }
 
+function parseBooleanKey(lines: string[], key: string, fallback: boolean) {
+  const pattern = new RegExp(`^${key}\\s*:\\s*(.+)$`, 'i')
+
+  for (const rawLine of lines) {
+    const lineWithoutComment = rawLine.replace(/\s+#.*$/, '')
+    const trimmed = lineWithoutComment.trim()
+    if (!trimmed) {
+      continue
+    }
+
+    const match = trimmed.match(pattern)
+    if (!match) {
+      continue
+    }
+
+    const parsed = parseYamlScalar(match[1]).trim().toLowerCase()
+    if (['true', 'yes', 'on', '1'].includes(parsed)) {
+      return true
+    }
+    if (['false', 'no', 'off', '0'].includes(parsed)) {
+      return false
+    }
+  }
+
+  return fallback
+}
+
 export function parseStarbaseYamlConfig(yaml: string): StarbaseConfig {
   const lines = yaml.split(/\r?\n/)
   const title = parseTitle(lines)
   const subtitle = parseSubtitle(lines)
   const authModes = parseAuthModes(lines)
+  const s3AdminEnabled = parseBooleanKey(
+    lines,
+    'S3AdminEnabled',
+    defaultStarbaseConfig.s3AdminEnabled,
+  )
 
   return {
     title,
     subtitle,
     authModes: authModes.length > 0 ? authModes : defaultStarbaseConfig.authModes,
+    s3AdminEnabled,
   }
 }
 

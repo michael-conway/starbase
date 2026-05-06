@@ -201,6 +201,8 @@ Supported config keys:
 * `Title`: app title shown in the authenticated shell
 * `Subtitle`: app subtitle shown in the authenticated shell
 * `AuthMode`: basic auth mode options shown on the login form
+* `S3AdminEnabled`: enables collection-details S3 bucket mapping tools backed by
+  `irods-go-rest` `/api/v1/ext/s3/*` routes
 
 See [public/config/README.md](./public/config/README.md) for the file-level
 runtime config notes.

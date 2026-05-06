@@ -11,3 +11,4 @@ Supported keys:
 - `Title`: app title text shown in the top header.
 - `Subtitle`: app subtitle text shown under the title.
 - `AuthMode`: list of basic auth mode options.
+- `S3AdminEnabled`: enables collection-details S3 bucket mapping tools.
