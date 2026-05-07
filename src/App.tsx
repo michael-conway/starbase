@@ -22,45 +22,16 @@ import { useQuery } from '@tanstack/react-query'
 import {
   IconInfoCircle,
   IconLogout,
+  IconSettings,
   IconTool,
   IconUserCircle,
 } from '@tabler/icons-react'
 import { primarySections } from './app-sections'
 import { defaultPath } from './features/explorer'
+import { userFromOIDCToken } from './features/identity'
 import { getFavorites, getHealth, getServiceInfo } from './lib/irods-rest'
 import { useAppConfig } from './providers/use-app-config'
 import { useSession } from './providers/use-session'
-
-function userFromOIDCToken(token: string) {
-  const payload = token.split('.')[1]
-  if (!payload) {
-    return ''
-  }
-
-  try {
-    const normalizedPayload = payload.replace(/-/g, '+').replace(/_/g, '/')
-    const paddedPayload = normalizedPayload.padEnd(
-      normalizedPayload.length + ((4 - (normalizedPayload.length % 4)) % 4),
-      '=',
-    )
-    const decoded = JSON.parse(window.atob(paddedPayload)) as {
-      preferred_username?: string
-      irods_user_name?: string
-      email?: string
-      sub?: string
-    }
-
-    return (
-      decoded.irods_user_name?.trim() ||
-      decoded.preferred_username?.trim() ||
-      decoded.email?.trim() ||
-      decoded.sub?.trim() ||
-      ''
-    )
-  } catch {
-    return ''
-  }
-}
 
 function zoneFromSearch(search: string) {
   const params = new URLSearchParams(search)
@@ -365,6 +336,14 @@ function App() {
 
                   <Menu.Dropdown>
                     <Menu.Label>Tools</Menu.Label>
+                    <Menu.Item
+                      component={NavLink}
+                      to="/app/settings"
+                      leftSection={<IconSettings size={16} />}
+                    >
+                      Settings
+                    </Menu.Item>
+                    <Menu.Divider />
                     <Menu.Item
                       component="a"
                       href="https://irods.org/download/"

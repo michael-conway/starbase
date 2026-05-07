@@ -325,6 +325,24 @@ export interface S3BucketResponse {
   bucket: S3Bucket
 }
 
+export interface S3UserSecretLinks {
+  self?: ActionLink
+  update?: ActionLink
+  delete?: ActionLink
+}
+
+export interface S3UserSecret {
+  user_name: string
+  user_home_path?: string
+  irods_path?: string
+  secret_key?: string
+  links?: S3UserSecretLinks
+}
+
+export interface S3UserSecretResponse {
+  user_secret: S3UserSecret
+}
+
 function validateFavoriteCollectionResponse(
   response: FavoriteCollectionResponse,
 ): FavoriteCollectionResponse {
@@ -407,6 +425,15 @@ function requireAbsolutePath(path: string, fieldName: string) {
 
   if (!normalized.startsWith('/')) {
     throw new ApiError(400, `${fieldName} must be an absolute path.`)
+  }
+
+  return normalized
+}
+
+function requireNonEmptyValue(value: string, fieldName: string) {
+  const normalized = value.trim()
+  if (!normalized) {
+    throw new ApiError(400, `${fieldName} is required.`)
   }
 
   return normalized
@@ -665,6 +692,68 @@ export async function deleteS3Bucket(bucketId: string, auth: RequestAuth, baseUr
 
   const response = await fetch(
     buildUrl(`/api/v1/ext/s3/buckets/${encodeURIComponent(normalizedBucketId)}`, baseUrl),
+    {
+      method: 'DELETE',
+      headers: buildHeaders(auth),
+    },
+  )
+
+  if (!response.ok) {
+    let payload: ApiErrorPayload | null = null
+
+    try {
+      payload = (await response.json()) as ApiErrorPayload
+    } catch {
+      // Fall back to the HTTP status when the response body is not JSON.
+    }
+
+    throw buildApiError(response.status, payload)
+  }
+}
+
+export function getS3UserSecret(userName: string, auth: RequestAuth, baseUrl?: string) {
+  const normalizedUserName = requireNonEmptyValue(userName, 'user_name')
+
+  return request<S3UserSecretResponse>(
+    `/api/v1/ext/s3/user-secrets/${encodeURIComponent(normalizedUserName)}`,
+    {
+      auth,
+      baseUrl,
+    },
+  )
+}
+
+export function storeS3UserSecret(
+  payload: {
+    user_name: string
+    secret_key?: string
+    auto_generate?: boolean
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+  method: 'POST' | 'PUT' = 'PUT',
+) {
+  const requestPayload = {
+    user_name: requireNonEmptyValue(payload.user_name, 'user_name'),
+    secret_key: payload.secret_key?.trim() || undefined,
+    auto_generate: Boolean(payload.auto_generate),
+  }
+
+  return request<S3UserSecretResponse>('/api/v1/ext/s3/user-secrets', {
+    auth,
+    baseUrl,
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(requestPayload),
+  })
+}
+
+export async function deleteS3UserSecret(userName: string, auth: RequestAuth, baseUrl?: string) {
+  const normalizedUserName = requireNonEmptyValue(userName, 'user_name')
+  const response = await fetch(
+    buildUrl(`/api/v1/ext/s3/user-secrets/${encodeURIComponent(normalizedUserName)}`, baseUrl),
     {
       method: 'DELETE',
       headers: buildHeaders(auth),
