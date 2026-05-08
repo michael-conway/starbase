@@ -67,7 +67,7 @@ function previewTitle(spec: FilePreviewSpec) {
     case 'yaml':
       return 'YAML editor'
     case 'text':
-      return 'Text editor'
+      return spec.canEdit ? 'Text editor' : 'Text preview'
     case 'csv':
       return 'CSV editor'
     case 'tsv':
@@ -107,7 +107,7 @@ export function ExplorerPreviewPage() {
       return undefined
     }
 
-    return filePreviewSpec(detailsQuery.data.path, detailsQuery.data.mime_type)
+    return filePreviewSpec(detailsQuery.data.path, detailsQuery.data.mime_type, detailsQuery.data.size)
   }, [detailsQuery.data])
 
   const contentQuery = useQuery({
@@ -414,6 +414,7 @@ export function ExplorerPreviewPage() {
                       maxRows={36}
                       value={textValue}
                       onChange={(event) => setTextValue(event.currentTarget.value)}
+                      readOnly={!previewSpec.canEdit}
                       className="preview-text-editor"
                     />
                   ) : null}

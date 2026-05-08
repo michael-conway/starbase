@@ -584,7 +584,7 @@ export function ExplorerDetailsPage() {
       return undefined
     }
 
-    return filePreviewSpec(detailsQuery.data.path, detailsQuery.data.mime_type)
+    return filePreviewSpec(detailsQuery.data.path, detailsQuery.data.mime_type, detailsQuery.data.size)
   }, [detailsQuery.data])
   const headerImagePreviewQuery = useQuery({
     queryKey: ['path-preview-thumbnail', irodsPath, connection],
