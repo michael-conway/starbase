@@ -21,6 +21,8 @@ export interface FilePreviewSpec {
   delimiter?: ',' | '\t'
 }
 
+const textPreviewFallbackLimitBytes = 1024 * 1024
+
 function extensionFromPath(path: string) {
   const filename = path.split('/').filter(Boolean).at(-1) ?? ''
   const dotIndex = filename.lastIndexOf('.')
@@ -57,7 +59,21 @@ export function parentPath(path: string) {
   return `/${segments.slice(0, -1).join('/')}`
 }
 
-export function filePreviewSpec(path: string, mimeType?: string): FilePreviewSpec {
+function textFallbackPreviewSpec() {
+  return {
+    kind: 'text' as const,
+    icon: 'text' as const,
+    label: 'Text editor (fallback)',
+    canOpenPreview: true,
+    canEdit: true,
+  }
+}
+
+function shouldUseTextFallback(sizeBytes?: number) {
+  return typeof sizeBytes === 'number' && sizeBytes >= 0 && sizeBytes < textPreviewFallbackLimitBytes
+}
+
+export function filePreviewSpec(path: string, mimeType?: string, sizeBytes?: number): FilePreviewSpec {
   const ext = extensionFromPath(path)
   const mime = normalizedMimeType(mimeType)
 
@@ -126,6 +142,10 @@ export function filePreviewSpec(path: string, mimeType?: string): FilePreviewSpe
     mime === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
     ['xls', 'xlsx'].includes(ext)
   ) {
+    if (shouldUseTextFallback(sizeBytes)) {
+      return textFallbackPreviewSpec()
+    }
+
     return {
       kind: 'excel',
       icon: 'table',
@@ -159,6 +179,10 @@ export function filePreviewSpec(path: string, mimeType?: string): FilePreviewSpe
   }
 
   if (isLikelyBinaryMime(mime) || ['bin', 'dat', 'exe', 'so', 'dylib'].includes(ext)) {
+    if (shouldUseTextFallback(sizeBytes)) {
+      return textFallbackPreviewSpec()
+    }
+
     return {
       kind: 'binary',
       icon: 'binary',
@@ -166,6 +190,10 @@ export function filePreviewSpec(path: string, mimeType?: string): FilePreviewSpe
       canOpenPreview: false,
       canEdit: false,
     }
+  }
+
+  if (shouldUseTextFallback(sizeBytes)) {
+    return textFallbackPreviewSpec()
   }
 
   return {

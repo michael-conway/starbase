@@ -60,6 +60,15 @@ export interface PathEntry {
   updated_at?: string
   parent?: ParentLink
   links?: {
+    self?: ActionLink
+    details?: ActionLink
+    parent?: ActionLink
+    children?: ActionLink
+    update?: ActionLink
+    delete?: ActionLink
+    relocate?: ActionLink
+    move?: ActionLink
+    copy?: ActionLink
     avus?: ActionLink
     acls?: ActionLink
     create_avu?: ActionLink
@@ -67,6 +76,9 @@ export interface PathEntry {
     resources?: ActionLink
     create_child_collection?: ActionLink
     create_child_data_object?: ActionLink
+    upload_contents?: ActionLink
+    replace_contents?: ActionLink
+    download_contents?: ActionLink
   }
   path_segments: PathSegmentLink[]
   hasChildren?: boolean
@@ -98,6 +110,34 @@ export interface PathChildrenResponse {
   irods_path: string
   path_segments: PathSegmentLink[]
   children: PathEntry[]
+  links?: {
+    self?: ActionLink
+    parent?: ActionLink
+    next?: ActionLink
+    prev?: ActionLink
+    create_child_collection?: ActionLink
+    create_child_data_object?: ActionLink
+    upload_contents?: ActionLink
+  }
+  search?: {
+    name_pattern?: string
+    recursive?: boolean
+    search_scope?: 'children' | 'subtree' | 'absolute'
+    case_sensitive?: boolean
+    matched_count?: number
+  }
+}
+
+export interface PathReplicasResponse {
+  irods_path: string
+  path_segments: PathSegmentLink[]
+  replicas: PathReplica[]
+  links?: {
+    self?: ActionLink
+    add_replica?: ActionLink
+    move_replica?: ActionLink
+    trim_replica?: ActionLink
+  }
 }
 
 export interface PathReplicasResponse {
@@ -247,6 +287,96 @@ export interface GroupLookupResponse {
   groups: GroupLookupEntry[]
 }
 
+export interface FavoriteLinks {
+  self?: ActionLink
+  details?: ActionLink
+  update?: ActionLink
+  delete?: ActionLink
+}
+
+export interface FavoriteCollectionLinks {
+  self?: ActionLink
+  create?: ActionLink
+  update?: ActionLink
+  delete?: ActionLink
+}
+
+export interface FavoriteEntry {
+  name: string
+  absolute_path: string
+  links?: FavoriteLinks
+}
+
+export interface FavoriteCollectionResponse {
+  favorites: FavoriteEntry[]
+  count?: number
+  links?: FavoriteCollectionLinks
+}
+
+export interface S3BucketLinks {
+  self?: ActionLink
+  path?: ActionLink
+  details?: ActionLink
+  update?: ActionLink
+  delete?: ActionLink
+}
+
+export interface S3Bucket {
+  bucket_id: string
+  irods_path: string
+  links?: S3BucketLinks
+}
+
+export interface S3BucketResponse {
+  bucket: S3Bucket
+}
+
+export interface S3UserSecretLinks {
+  self?: ActionLink
+  update?: ActionLink
+  delete?: ActionLink
+}
+
+export interface S3UserSecret {
+  user_name: string
+  user_home_path?: string
+  irods_path?: string
+  secret_key?: string
+  links?: S3UserSecretLinks
+}
+
+export interface S3UserSecretResponse {
+  user_secret: S3UserSecret
+}
+
+function validateFavoriteCollectionResponse(
+  response: FavoriteCollectionResponse,
+): FavoriteCollectionResponse {
+  const favorites = Array.isArray(response.favorites) ? response.favorites : []
+  favorites.forEach((favorite, index) => {
+    if (typeof favorite?.absolute_path !== 'string' || !favorite.absolute_path.trim()) {
+      throw new ApiError(
+        502,
+        `Invalid favorites payload: favorites[${index}].absolute_path is required.`,
+      )
+    }
+    if (!favorite.absolute_path.trim().startsWith('/')) {
+      throw new ApiError(
+        502,
+        `Invalid favorites payload: favorites[${index}].absolute_path must be absolute.`,
+      )
+    }
+    if (typeof favorite?.name !== 'string' || !favorite.name.trim()) {
+      throw new ApiError(
+        502,
+        `Invalid favorites payload: favorites[${index}].name is required.`,
+      )
+    }
+  })
+
+  return response
+}
+
 export interface PathContentsUploadResponse {
   path: string
   parent_path: string
@@ -277,6 +407,7 @@ export interface RequestAuth {
   mode: AuthMode
   username?: string
   password?: string
+  basicAuthType?: string
   token?: string
 }
 
@@ -290,6 +421,28 @@ export class ApiError extends Error {
     this.status = status
     this.code = code
   }
+}
+
+function requireAbsolutePath(path: string, fieldName: string) {
+  const normalized = path.trim()
+  if (!normalized) {
+    throw new ApiError(400, `${fieldName} is required.`)
+  }
+
+  if (!normalized.startsWith('/')) {
+    throw new ApiError(400, `${fieldName} must be an absolute path.`)
+  }
+
+  return normalized
+}
+
+function requireNonEmptyValue(value: string, fieldName: string) {
+  const normalized = value.trim()
+  if (!normalized) {
+    throw new ApiError(400, `${fieldName} is required.`)
+  }
+
+  return normalized
 }
 
 const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? ''
@@ -387,14 +540,26 @@ async function request<T>(
 
   if (!response.ok) {
     let payload: ApiErrorPayload | null = null
+    let fallbackMessage: string | undefined
 
     try {
       payload = (await response.json()) as ApiErrorPayload
     } catch {
-      // Fall back to the HTTP status when the response body is not JSON.
+      try {
+        const text = (await response.text()).trim()
+        if (text) {
+          fallbackMessage = text
+        }
+      } catch {
+        // Fall back to the HTTP status when the response body is not JSON.
+      }
     }
 
-    throw buildApiError(response.status, payload)
+    throw new ApiError(
+      response.status,
+      payload?.message ?? fallbackMessage ?? `Request failed with status ${response.status}`,
+      payload?.code,
+    )
   }
 
   return (await response.json()) as T
@@ -402,7 +567,7 @@ async function request<T>(
 
 function withPath(path: string, options?: { verbose?: number }) {
   const params = new URLSearchParams({
-    irods_path: path,
+    irods_path: requireAbsolutePath(path, 'irods_path'),
   })
 
   if (options?.verbose !== undefined) {
@@ -480,6 +645,237 @@ export function searchGroups(
   })
 }
 
+export function getFavorites(auth: RequestAuth, baseUrl?: string) {
+  return request<FavoriteCollectionResponse>('/api/v1/ext/favorites', {
+    auth,
+    baseUrl,
+  }).then((response) => validateFavoriteCollectionResponse(response))
+}
+
+export function getS3BucketByPath(irodsPath: string, auth: RequestAuth, baseUrl?: string) {
+  const params = new URLSearchParams({
+    irods_path: requireAbsolutePath(irodsPath, 'irods_path'),
+  })
+
+  return request<S3BucketResponse>(`/api/v1/ext/s3/buckets/by-path?${params.toString()}`, {
+    auth,
+    baseUrl,
+  })
+}
+
+export function upsertS3Bucket(
+  payload: {
+    irods_path: string
+    bucket_name?: string
+    auto_generate?: boolean
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+  method: 'POST' | 'PUT' = 'POST',
+) {
+  const requestPayload = {
+    irods_path: requireAbsolutePath(payload.irods_path, 'irods_path'),
+    bucket_name: payload.bucket_name?.trim() || undefined,
+    auto_generate: Boolean(payload.auto_generate),
+  }
+
+  return request<S3BucketResponse>('/api/v1/ext/s3/buckets', {
+    auth,
+    baseUrl,
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(requestPayload),
+  })
+}
+
+export async function deleteS3Bucket(bucketId: string, auth: RequestAuth, baseUrl?: string) {
+  const normalizedBucketId = bucketId.trim()
+  if (!normalizedBucketId) {
+    throw new ApiError(400, 'bucket_id is required.')
+  }
+
+  const response = await fetch(
+    buildUrl(`/api/v1/ext/s3/buckets/${encodeURIComponent(normalizedBucketId)}`, baseUrl),
+    {
+      method: 'DELETE',
+      headers: buildHeaders(auth),
+    },
+  )
+
+  if (!response.ok) {
+    let payload: ApiErrorPayload | null = null
+
+    try {
+      payload = (await response.json()) as ApiErrorPayload
+    } catch {
+      // Fall back to the HTTP status when the response body is not JSON.
+    }
+
+    throw buildApiError(response.status, payload)
+  }
+}
+
+export function getS3UserSecret(userName: string, auth: RequestAuth, baseUrl?: string) {
+  const normalizedUserName = requireNonEmptyValue(userName, 'user_name')
+
+  return request<S3UserSecretResponse>(
+    `/api/v1/ext/s3/user-secrets/${encodeURIComponent(normalizedUserName)}`,
+    {
+      auth,
+      baseUrl,
+    },
+  )
+}
+
+export function storeS3UserSecret(
+  payload: {
+    user_name: string
+    secret_key?: string
+    auto_generate?: boolean
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+  method: 'POST' | 'PUT' = 'PUT',
+) {
+  const requestPayload = {
+    user_name: requireNonEmptyValue(payload.user_name, 'user_name'),
+    secret_key: payload.secret_key?.trim() || undefined,
+    auto_generate: Boolean(payload.auto_generate),
+  }
+
+  return request<S3UserSecretResponse>('/api/v1/ext/s3/user-secrets', {
+    auth,
+    baseUrl,
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(requestPayload),
+  })
+}
+
+export async function deleteS3UserSecret(userName: string, auth: RequestAuth, baseUrl?: string) {
+  const normalizedUserName = requireNonEmptyValue(userName, 'user_name')
+  const response = await fetch(
+    buildUrl(`/api/v1/ext/s3/user-secrets/${encodeURIComponent(normalizedUserName)}`, baseUrl),
+    {
+      method: 'DELETE',
+      headers: buildHeaders(auth),
+    },
+  )
+
+  if (!response.ok) {
+    let payload: ApiErrorPayload | null = null
+
+    try {
+      payload = (await response.json()) as ApiErrorPayload
+    } catch {
+      // Fall back to the HTTP status when the response body is not JSON.
+    }
+
+    throw buildApiError(response.status, payload)
+  }
+}
+
+export function addFavorite(
+  action: ActionLink,
+  payload: {
+    name: string
+    absolute_path: string
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  const absolutePath = requireAbsolutePath(payload.absolute_path, 'absolute_path')
+  const trimmedName = payload.name.trim()
+
+  return request<FavoriteCollectionResponse>(action.href, {
+    auth,
+    baseUrl,
+    method: action.method ?? 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      name: trimmedName,
+      absolute_path: absolutePath,
+    }),
+  })
+}
+
+export function renameFavorite(
+  action: ActionLink,
+  payload: {
+    name: string
+    absolute_path: string
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  const absolutePath = requireAbsolutePath(payload.absolute_path, 'absolute_path')
+  const trimmedName = payload.name.trim()
+
+  return request<FavoriteCollectionResponse>(action.href, {
+    auth,
+    baseUrl,
+    method: action.method ?? 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      name: trimmedName,
+      absolute_path: absolutePath,
+    }),
+  })
+}
+
+export async function removeFavorite(
+  action: ActionLink,
+  payload: {
+    absolute_path: string
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  const absolutePath = requireAbsolutePath(payload.absolute_path, 'absolute_path')
+  const response = await fetch(buildUrl(action.href, baseUrl), {
+    method: action.method ?? 'DELETE',
+    headers: {
+      ...buildHeaders(auth),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      absolute_path: absolutePath,
+    }),
+  })
+
+  if (!response.ok) {
+    let payloadError: ApiErrorPayload | null = null
+    let fallbackMessage: string | undefined
+
+    try {
+      payloadError = (await response.json()) as ApiErrorPayload
+    } catch {
+      try {
+        const text = (await response.text()).trim()
+        if (text) {
+          fallbackMessage = text
+        }
+      } catch {
+        // Fall back to the HTTP status when the response body is not JSON.
+      }
+    }
+
+    throw new ApiError(
+      response.status,
+      payloadError?.message ?? fallbackMessage ?? `Request failed with status ${response.status}`,
+      payloadError?.code,
+    )
+  }
+}
+
 export function getPath(
   irodsPath: string,
   auth: RequestAuth,
@@ -496,8 +892,55 @@ export function getPathChildren(
   irodsPath: string,
   auth: RequestAuth,
   baseUrl?: string,
+  options?: {
+    name_pattern?: string
+    search_scope?: 'children' | 'subtree' | 'absolute'
+    recursive?: boolean
+    case_sensitive?: boolean
+    sort?: 'path' | 'name' | 'kind' | 'size' | 'created_at' | 'updated_at'
+    order?: 'asc' | 'desc'
+    limit?: number
+    offset?: number
+  },
 ) {
-  return request<PathChildrenResponse>(`/api/v1/path/children${withPath(irodsPath)}`, {
+  const params = new URLSearchParams({
+    irods_path: requireAbsolutePath(irodsPath, 'irods_path'),
+  })
+
+  const namePattern = options?.name_pattern?.trim()
+  if (namePattern) {
+    params.set('name_pattern', namePattern)
+  }
+
+  if (options?.search_scope) {
+    params.set('search_scope', options.search_scope)
+  }
+
+  if (options?.recursive !== undefined) {
+    params.set('recursive', `${options.recursive}`)
+  }
+
+  if (options?.case_sensitive !== undefined) {
+    params.set('case_sensitive', `${options.case_sensitive}`)
+  }
+
+  if (options?.sort) {
+    params.set('sort', options.sort)
+  }
+
+  if (options?.order) {
+    params.set('order', options.order)
+  }
+
+  if (options?.limit !== undefined) {
+    params.set('limit', `${options.limit}`)
+  }
+
+  if (options?.offset !== undefined) {
+    params.set('offset', `${options.offset}`)
+  }
+
+  return request<PathChildrenResponse>(`/api/v1/path/children?${params.toString()}`, {
     auth,
     baseUrl,
   })
@@ -531,7 +974,7 @@ export async function deletePath(
   options?: { force?: boolean },
 ) {
   const params = new URLSearchParams({
-    irods_path: irodsPath,
+    irods_path: requireAbsolutePath(irodsPath, 'irods_path'),
   })
 
   if (options?.force) {
@@ -573,6 +1016,119 @@ export function renamePath(
   })
 }
 
+export function relocatePath(
+  irodsPath: string,
+  payload: {
+    operation: 'move' | 'copy'
+    destination_path: string
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  return request<PathEntry>(`/api/v1/path${withPath(irodsPath)}`, {
+    auth,
+    baseUrl,
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      operation: payload.operation,
+      destination_path: requireAbsolutePath(payload.destination_path, 'destination_path'),
+    }),
+  })
+}
+
+export function createPathChildFromAction(
+  action: ActionLink,
+  payload: {
+    child_name: string
+    kind: 'collection' | 'data_object'
+    mkdirs?: boolean
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  return request<PathEntry>(action.href, {
+    auth,
+    baseUrl,
+    method: action.method ?? 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function renamePathByAction(
+  action: ActionLink,
+  payload: { new_name: string },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  return request<PathEntry>(action.href, {
+    auth,
+    baseUrl,
+    method: action.method ?? 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function relocatePathByAction(
+  action: ActionLink,
+  payload: {
+    operation: 'move' | 'copy'
+    destination_path: string
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  return request<PathEntry>(action.href, {
+    auth,
+    baseUrl,
+    method: action.method ?? 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      operation: payload.operation,
+      destination_path: requireAbsolutePath(payload.destination_path, 'destination_path'),
+    }),
+  })
+}
+
+export async function deletePathByAction(
+  action: ActionLink,
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: { force?: boolean },
+) {
+  const href = new URL(buildAbsoluteUrl(action.href, baseUrl))
+  if (options?.force) {
+    href.searchParams.set('force', 'true')
+  }
+
+  const response = await fetch(href.toString(), {
+    method: action.method ?? 'DELETE',
+    headers: buildHeaders(auth),
+  })
+
+  if (!response.ok) {
+    let payload: ApiErrorPayload | null = null
+
+    try {
+      payload = (await response.json()) as ApiErrorPayload
+    } catch {
+      // Fall back to the HTTP status when the response body is not JSON.
+    }
+
+    throw buildApiError(response.status, payload)
+  }
+}
+
 export function uploadPathContents(
   payload: {
     parent_path: string
@@ -592,7 +1148,7 @@ export function uploadPathContents(
     const xhr = new XMLHttpRequest()
     const formData = new FormData()
 
-    formData.set('parent_path', payload.parent_path)
+    formData.set('parent_path', requireAbsolutePath(payload.parent_path, 'parent_path'))
     formData.set('file_name', payload.file_name)
     formData.set('content', payload.content)
 

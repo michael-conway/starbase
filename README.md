@@ -4,87 +4,104 @@ React web interface for `irods-go-rest`.
 
 ## Overview
 
-This project provides a React-based single-page application for iRODS browsing
-and operator workflows over the `irods-go-rest` API. The current starter is
-intentionally focused on the first-use product slice: login, explorer, and
-setup. It is designed to grow into a broader browser and administrative tool
-without coupling future sections into the initial user experience.
+`starbase` is a Vite, React, and TypeScript single-page application for
+browsing and operating on iRODS data through the `irods-go-rest` API. The active
+application surface is centered on authenticated iRODS browsing, resource
+inspection, object details, metadata, permissions, tickets, uploads, downloads,
+and operator-oriented setup guidance.
 
 It includes:
 
-* an auth-first browser entry flow with Basic and OIDC-backed paths
-* an explorer-first application shell for path browsing and collection work
-* a typed path-first client aligned to the current `irods-go-rest` contract
-* route-level code splitting and section definitions that can expand later
+* Basic and OIDC-backed sign-in paths
+* an authenticated app shell with health and service information
+* path-first collection and data object browsing
+* object detail views for overview, storage, AVUs, permissions, and tickets
+* resource listing and resource detail pages
+* queued upload management with progress and overwrite handling
+* runtime app branding and auth-mode configuration from YAML files in `public/config`
 * local development conventions matched to the `irods-go-rest` docker test framework
+* Ubuntu-based Docker image build support and GitHub Actions verification
 
 ## Project Metadata
 
 | Field | Value |
 | --- | --- |
 | Project Name | `starbase` |
-| Current Version | `TBD` |
+| Current Version | `0.0.0` |
 | Status | `Active Development` |
 | Primary Developer | `Mike Conway` |
 | Organization | `NIEHS` |
 | Repository | `https://github.com/michael-conway/starbase` |
 | Companion Backend | `../irods-go-rest` |
 | Contact | `mike.conway@nih.gov` |
-| License | `TBD` |
+| License | `BSD 2-Clause` |
 
 ## Master Index
 
 * [Developer Notes](./DEVELOPER_NOTES.md)
+* [Runtime Config Notes](./public/config/README.md)
 
 ## Project Structure
 
-The repository follows a conventional Vite and React layout centered around a
-thin frontend over `irods-go-rest`, an auth/session provider, and page-level
-workflows for the current browser starter.
+The repository follows a conventional Vite and React layout with a thin frontend
+over `irods-go-rest`, shared session/config/upload providers, and route-level
+page modules.
 
 | Path | Purpose |
 | --- | --- |
-| `src/main.tsx` | Runtime composition, Mantine theme, React Query, and router bootstrap |
+| `src/main.tsx` | Runtime composition, Mantine theme, React Query, notifications, router bootstrap |
 | `src/router.tsx` | Route map, auth gating, and lazy-loaded page registration |
-| `src/App.tsx` | Authenticated app shell, navigation, and API health indicator |
-| `src/app-sections.ts` | Active and future section definitions for later expansion |
-| `src/providers/` | Shared frontend state providers such as session/auth state |
-| `src/lib/` | `irods-go-rest` client and request helpers |
-| `src/pages/` | Login, explorer, setup, and future major-view page modules |
-| `public/` | Static frontend assets |
+| `src/App.tsx` | Authenticated app shell, navigation, health status, service information |
+| `src/app-sections.ts` | Active app sections and scaffolded future section definitions |
+| `src/pages/` | Login, setup, explorer, resource, detail, preview, and scaffolded major-view pages |
+| `src/providers/` | Session, app config, and upload manager providers |
+| `src/lib/irods-rest.ts` | Typed `irods-go-rest` client and request helpers |
+| `src/features/` | Explorer and file preview helpers |
+| `public/config/` | Runtime YAML config loaded by the browser |
 | `test/integration/` | Env-gated integration tests against a running backend |
+| `Dockerfile` | Ubuntu-based multi-stage production image build |
+| `docker/nginx.conf` | nginx SPA fallback config for the production image |
+| `.github/workflows/` | npm verification and Docker image build workflows |
 
-## Stack and Testing Strategy
+## Stack
 
-The implementation is written in React and TypeScript and keeps the frontend
-thin relative to the backend. `irods-go-rest` remains the source of truth for
-API shape, authentication semantics, and iRODS-facing behavior, while `starbase`
-owns route structure, workspace interactions, and browser-oriented UI design.
+The current frontend stack is:
 
-The current stack is:
+* Vite 8
+* React 19
+* TypeScript 6
+* React Router 7
+* TanStack Query 5
+* Mantine 9
+* Tabler React icons
+* Node.js 24 in CI and Docker builds
 
-* Vite
-* React
-* TypeScript
-* React Router
-* TanStack Query
-* Mantine
+`irods-go-rest` remains the source of truth for API shape, authentication
+semantics, and iRODS-facing behavior. `starbase` owns route structure,
+workspace interactions, runtime configuration, and browser-oriented UI.
 
-Mantine is currently used for the application shell, forms, overlays, and
-general UI primitives. The long-term intent is to keep explorer-specific
-interaction patterns explicit rather than depending on a generic component suite
-to define the browser UX.
+## Active Routes
 
-Testing is currently centered on:
+| Route | Purpose |
+| --- | --- |
+| `/` | Redirects to the appropriate app entry point |
+| `/login` | Basic or OIDC sign-in |
+| `/setup` | Local setup and connection guidance |
+| `/app` | Authenticated shell; redirects to explorer |
+| `/app/explorer` | Collection and data object browser |
+| `/app/explorer/details` | Data object or collection details |
+| `/app/explorer/preview` | Preview route for supported file types |
+| `/app/resources` | iRODS resource listing |
+| `/app/resources/details` | Resource detail page |
+| `/app/setup` | Setup page inside the authenticated shell |
 
-* compile-time validation through `tsc -b`
-* production bundle verification through `vite build`
-* env-gated integration tests in `test/integration/`
-* backend contract validation by staying aligned to `../irods-go-rest`
+Search, rules, and admin pages are scaffolded in `src/pages/` and declared as
+future sections in `src/app-sections.ts`, but they are not part of the active
+navigation or route table yet.
 
 ## Quick Start
 
-Run the frontend locally:
+Install dependencies and run the frontend locally:
 
 ```bash
 npm install
@@ -92,7 +109,8 @@ npm run dev
 ```
 
 By default, the Vite dev server proxies backend traffic to
-`http://localhost:8080`.
+`http://localhost:8080`. The proxy covers `/api`, `/healthz`, `/openapi.yaml`,
+`/swagger`, and `/web`.
 
 Then visit:
 
@@ -100,69 +118,190 @@ Then visit:
 * `http://localhost:5173/app/explorer`
 * `http://localhost:5173/setup`
 
-## Development Build
+Leave the login page API base URL blank to use the Vite proxy, or provide an
+absolute backend URL when connecting to a published `irods-go-rest` service.
 
-Build the production bundle locally:
+## Development Commands
+
+Install from the lockfile:
+
+```bash
+npm ci
+```
+
+Run lint:
+
+```bash
+npm run lint
+```
+
+Build the production bundle:
 
 ```bash
 npm run build
 ```
 
-This runs TypeScript compilation and then the Vite production build.
+Preview the production bundle locally:
+
+```bash
+npm run preview
+```
+
+The production build runs TypeScript project validation with `tsc -b` and then
+the Vite production build.
+
+## Docker Build
+
+Build the Ubuntu-based production image:
+
+```bash
+docker build --tag starbase:local .
+```
+
+Run the container on local port `5173`:
+
+```bash
+docker run --rm -p 5173:8080 starbase:local
+```
+
+Then visit `http://localhost:5173/login`.
+
+The image builds the Vite bundle in an `ubuntu:24.04` Node 24 stage and serves
+the static output from an `ubuntu:24.04` nginx runtime stage on container port
+`8080`.
+
+For a container with a baked-in default backend API URL, set the Vite build arg:
+
+```bash
+docker build \
+  --tag starbase:local \
+  --build-arg VITE_API_BASE_URL=http://localhost:8080 \
+  .
+```
+
+`VITE_API_BASE_URL` is embedded at build time by Vite. Users can still enter a
+different API base URL on the login page for their browser session.
+
+## Runtime Configuration
+
+At browser startup, `starbase` loads YAML configuration from:
+
+```text
+/config/starbase.yaml
+```
+
+Set `VITE_STARBASE_CONFIG_PATH=<path>` at build time to load an explicit config file:
+
+```text
+<path>
+```
+
+Example:
+
+```text
+/config/starbase.niehs.yaml
+```
+
+Only browser-reachable paths are valid (site-relative `/config/...` or absolute
+`http(s)://...` URLs). Filesystem paths like `/Users/...` are ignored and the
+app falls back to `/config/starbase.yaml`.
+
+Supported config keys:
+
+* `Title`: app title shown in the authenticated shell
+* `Subtitle`: app subtitle shown in the authenticated shell
+* `AuthMode`: basic auth mode options shown on the login form
+* `S3AdminEnabled`: enables S3 administration tools backed by
+  `irods-go-rest` `/api/v1/ext/s3/*` routes, including collection bucket
+  mappings and user S3 API secret settings
+
+See [public/config/README.md](./public/config/README.md) for the file-level
+runtime config notes.
 
 ## Auth Model
 
-The frontend follows the current `irods-go-rest` auth model and exposes two
-entry paths:
+The frontend supports two session modes:
 
-* Basic auth
-* OIDC-backed bearer auth
+* Basic auth with a selectable backend auth type such as `native` or `pam`
+* OIDC bearer-token auth
 
-Basic credentials can be entered directly in the SPA and are sent as
-`Authorization: Basic <base64(user:password)>`.
+Basic credentials are stored in browser session storage for the current tab and
+sent as `Authorization: Basic <base64(user:password)>`.
 
-OIDC currently uses the backend browser flow under `/web/login`. Until
-`irods-go-rest` exposes an SPA-oriented session endpoint, the frontend launches
-that browser flow and accepts a pasted access token for bearer-authenticated API
-requests.
+OIDC currently launches the backend browser flow under `/web/login` and accepts
+a pasted access token for bearer-authenticated API requests.
+
+Session preferences such as preferred auth mode, basic auth type, and API base
+URL are stored in local storage. Session secrets are stored in session storage
+and are cleared by signing out or closing the browser tab.
 
 ## Explorer Model
 
-The explorer is intentionally path-first because the current backend is
-path-first.
+The explorer is intentionally path-first because the backend contract is
+path-first. The UI supports:
 
-Current backend endpoints used by the starter:
+* collection child listing with breadcrumbs and quick locations
+* scoped searching inside the current collection or subtree
+* collection and data object creation
+* rename, move, copy, and delete actions
+* favorite add/remove support
+* upload and download actions
+* object and collection detail pages
+* replicas, checksums, AVUs, ACLs, inheritance, and tickets
+* resource browsing and resource detail inspection
+
+Current backend areas used by the frontend include:
 
 * `GET /healthz`
-* `GET /api/v1/path?irods_path=...`
-* `GET /api/v1/path/children?irods_path=...`
-* `GET /api/v1/path/contents?irods_path=...`
+* `GET /api/v1/server`
+* `/api/v1/path`
+* `/api/v1/path/children`
+* `/api/v1/path/contents`
+* `/api/v1/path/replicas`
+* `/api/v1/path/avu`
+* `/api/v1/path/acl`
+* `/api/v1/path/checksum`
+* `/api/v1/resource`
+* `/api/v1/user`
+* `/api/v1/usergroup`
+* `/api/v1/ticket`
+* `/api/v1/ext/favorites`
 
-The current UI emphasizes:
+## Testing
 
-* login that leads directly into the browser workspace
-* path navigation with breadcrumbs
-* collection child listing
-* object detail display
-* upload and download entry points
+Local verification currently centers on:
 
-Future major areas such as search, rules, and administration remain scaffoldable
-in `src/app-sections.ts`, but they are intentionally not part of the active
-route table or visible navigation today.
+```bash
+npm run lint
+npm run build
+```
 
-## Styling and Customization
+Integration tests are env-gated and expect a running `irods-go-rest` service:
 
-The visual baseline is currently optimized for clarity, legibility, and a
-professional light theme. Shared theme and CSS variables in `src/main.tsx` and
-`src/index.css` are intended to be the customization boundary for future style
-work, so palette changes do not require page-by-page rewrites.
+```bash
+STARBASE_INTEGRATION=1 \
+STARBASE_TEST_BASE_URL=http://localhost:8080 \
+STARBASE_TEST_BASIC_USERNAME=rods \
+STARBASE_TEST_BASIC_PASSWORD=rods \
+STARBASE_TEST_IRODS_PATH=/tempZone/home/rods \
+STARBASE_TEST_COLLECTION_PATH=/tempZone/home/rods \
+npm run test:integration
+```
 
-The current design goals are:
+You can use `STARBASE_TEST_BEARER_TOKEN` instead of the basic username/password
+variables for bearer-authenticated integration checks.
 
-* readable and accessible defaults
-* restrained visual density
-* clean page hierarchy
-* separation between shell styling and explorer-specific interaction design
+## Continuous Integration
+
+GitHub Actions currently includes:
+
+* `.github/workflows/basic-checks.yml`: runs on `ubuntu-latest`, installs Node
+  24, runs `npm ci`, `npm run lint`, and `npm run build`
+* `.github/workflows/docker-build.yml`: runs on `ubuntu-latest` and verifies
+  `docker build --tag starbase:ci .`
+
+Both workflows run on pushes to `develop` and pull requests targeting `develop`
+or `main`.
 
 ## Integration Environment
 
@@ -189,8 +328,19 @@ backend is published elsewhere.
 
 Supported frontend environment variables:
 
-* `VITE_PROXY_TARGET`
-* `VITE_API_BASE_URL`
+* `VITE_PROXY_TARGET`: dev server proxy target, defaulting to `http://localhost:8080`
+* `VITE_API_BASE_URL`: production bundle default API base URL
+* `VITE_STARBASE_CONFIG_PATH`: runtime config path override (for example `/config/starbase.niehs.yaml`)
+
+Supported integration test environment variables:
+
+* `STARBASE_INTEGRATION`
+* `STARBASE_TEST_BASE_URL`
+* `STARBASE_TEST_BEARER_TOKEN`
+* `STARBASE_TEST_BASIC_USERNAME`
+* `STARBASE_TEST_BASIC_PASSWORD`
+* `STARBASE_TEST_IRODS_PATH`
+* `STARBASE_TEST_COLLECTION_PATH`
 
 ## References
 

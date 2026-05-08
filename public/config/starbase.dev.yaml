@@ -1,0 +1,9 @@
+Title: Starbase
+Subtitle: iRODS Explorer
+S3AdminEnabled: true
+
+AuthMode:
+  - Mode: native
+    AuthName: irods auth
+  - Mode: pam
+    AuthName: pam auth

@@ -12,8 +12,10 @@ import '@mantine/core/styles.css'
 import '@mantine/notifications/styles.css'
 import './index.css'
 import { router } from './router'
+import { AppConfigProvider } from './providers/app-config'
 import { SessionProvider } from './providers/session'
 import { UploadProvider } from './providers/upload-provider'
+import { ApiError } from './lib/irods-rest'
 
 const theme = createTheme({
   primaryColor: 'teal',
@@ -43,18 +45,35 @@ const resolver: CSSVariablesResolver = () => ({
   dark: {},
 })
 
-const queryClient = new QueryClient()
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: (failureCount, error) => {
+        if (error instanceof ApiError && error.status >= 500) {
+          return false
+        }
+
+        return failureCount < 1
+      },
+      retryOnMount: false,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+    },
+  },
+})
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <MantineProvider theme={theme} cssVariablesResolver={resolver} defaultColorScheme="light">
         <Notifications position="top-right" />
-        <SessionProvider>
-          <UploadProvider>
-            <RouterProvider router={router} />
-          </UploadProvider>
-        </SessionProvider>
+        <AppConfigProvider>
+          <SessionProvider>
+            <UploadProvider>
+              <RouterProvider router={router} />
+            </UploadProvider>
+          </SessionProvider>
+        </AppConfigProvider>
       </MantineProvider>
     </QueryClientProvider>
   </StrictMode>,

@@ -93,6 +93,40 @@ body {
   align-items: center;
 }
 
+.explorer-controls-panel {
+  border: 1px solid var(--app-border);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgba(243, 247, 250, 0.92), rgba(239, 244, 248, 0.9));
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.explorer-search-panel {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.8);
+  padding: 10px;
+}
+
+.explorer-search-pattern {
+  min-width: 260px;
+  flex: 1;
+}
+
+.explorer-favorite-button {
+  flex: 1;
+  min-width: 0;
+}
+
+.explorer-hover-path {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .explorer-path-input {
   flex: 1;
 }
@@ -118,18 +152,27 @@ body {
   background: rgba(15, 118, 110, 0.14);
 }
 
-.upload-dock {
+.upload-footer {
   position: fixed;
-  right: 20px;
-  bottom: 20px;
-  width: min(380px, calc(100vw - 32px));
-  max-height: min(65vh, 560px);
-  overflow: auto;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 12px;
+  width: min(680px, calc(100vw - 24px));
   z-index: 220;
   background: rgba(255, 255, 255, 0.96);
   backdrop-filter: blur(18px);
   border: 1px solid var(--app-border);
-  box-shadow: 0 20px 48px rgba(15, 23, 42, 0.16);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
+}
+
+.upload-drawer .mantine-Drawer-content {
+  max-height: min(72vh, 620px);
+}
+
+.upload-drawer-body {
+  max-height: min(58vh, 520px);
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .upload-dock-item {
@@ -311,9 +354,11 @@ body {
     grid-template-columns: 1fr;
   }
 
-  .upload-dock {
+  .upload-footer {
+    left: 12px;
     right: 12px;
+    transform: none;
     bottom: 12px;
-    width: calc(100vw - 24px);
+    width: auto;
   }
 }

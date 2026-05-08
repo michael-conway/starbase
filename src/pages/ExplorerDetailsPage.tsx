@@ -13,6 +13,7 @@ import {
   Divider,
   Group,
   Loader,
+  Menu,
   Modal,
   Paper,
   Select,
@@ -42,6 +43,8 @@ import {
   IconKey,
   IconLock,
   IconPlus,
+  IconStar,
+  IconStarFilled,
   IconEye,
   IconTerminal2,
   IconTrash,
@@ -52,6 +55,7 @@ import { filePreviewSpec } from '../features/file-preview'
 import { displayName, formatDateTime } from '../features/explorer'
 import {
   addPathACL,
+  addFavorite,
   addAVU,
   actionLinkUrl,
   addPathReplica,
@@ -62,27 +66,40 @@ import {
   deletePathACL,
   deleteAVU,
   deletePath,
+  deletePathByAction,
   deleteTicket,
   downloadPath,
+  deleteS3Bucket,
   getPath,
+  getPathChildren,
   getPathACL,
   getPathAVUs,
+  getFavorites,
   getResources,
+  getS3BucketByPath,
   searchGroups,
   searchUsers,
   getTickets,
   type PathACLEntry,
   type PathACLResponse,
   renamePath,
+  relocatePath,
+  relocatePathByAction,
+  removeFavorite,
+  renamePathByAction,
   setPathACLInheritance,
   movePathReplica,
   trimPathReplica,
   type ActionLink,
+  type FavoriteEntry,
   type PathEntry,
+  type S3Bucket,
   type TicketEntry,
   updatePathACL,
   updateTicket,
+  upsertS3Bucket,
 } from '../lib/irods-rest'
+import { useAppConfig } from '../providers/use-app-config'
 import { useSession } from '../providers/use-session'
 import { useUploadManager } from '../providers/upload-context'
 
@@ -90,12 +107,28 @@ interface DeleteDialogState {
   path: string
   label: string
   kind: PathEntry['kind']
+  action?: ActionLink
 }
 
 interface RenameDialogState {
   path: string
   label: string
   kind: PathEntry['kind']
+  action?: ActionLink
+}
+
+type RelocateOperation = 'move' | 'copy'
+
+interface RelocateDialogState {
+  operation: RelocateOperation
+  browsePath: string
+  destinationPathDraft: string
+}
+
+interface S3BucketDialogState {
+  mode: 'add' | 'update'
+  path: string
+  currentBucketId?: string
 }
 
 interface ACLFormState {
@@ -229,6 +262,56 @@ function shellQuote(value: string) {
   }
 
   return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+function normalizeCollectionPath(path: string) {
+  const trimmed = path.trim()
+  if (!trimmed) {
+    return ''
+  }
+
+  if (!trimmed.startsWith('/')) {
+    return ''
+  }
+
+  if (trimmed === '/') {
+    return '/'
+  }
+
+  return trimmed.replace(/\/+$/, '')
+}
+
+function defaultS3BucketNameForPath(irodsPath: string) {
+  const normalized = displayName(irodsPath)
+    .toLowerCase()
+    .replace(/[^a-z0-9.-]+/g, '-')
+    .replace(/^[^a-z0-9]+/, '')
+    .replace(/[^a-z0-9]+$/, '')
+    .replace(/-{2,}/g, '-')
+
+  if (normalized.length >= 3) {
+    return normalized.slice(0, 63)
+  }
+
+  return ''
+}
+
+function destinationPathForSource(sourcePath: string, destinationCollectionPath: string) {
+  const sourceName = displayName(sourcePath)
+  const destinationCollection = normalizeCollectionPath(destinationCollectionPath)
+  if (!sourceName || !destinationCollection) {
+    return ''
+  }
+
+  return destinationCollection === '/' ? `/${sourceName}` : `${destinationCollection}/${sourceName}`
+}
+
+function relocateActionForEntry(entry: PathEntry, operation: RelocateOperation): ActionLink | undefined {
+  if (operation === 'move') {
+    return entry.links?.move ?? entry.links?.relocate ?? entry.links?.update
+  }
+
+  return entry.links?.copy ?? entry.links?.relocate ?? entry.links?.update
 }
 
 function ticketCreateAction(entry?: Pick<PathEntry, 'links'>): ActionLink | undefined {
@@ -395,11 +478,23 @@ function collectionInheritanceAction(
 }
 
 export function ExplorerDetailsPage() {
+  const appConfig = useAppConfig()
   const { connection } = useSession()
   const { openFilePicker } = useUploadManager()
   const navigate = useNavigate()
+  const s3AdminEnabled = appConfig.config.s3AdminEnabled
   const [searchParams] = useSearchParams()
   const irodsPath = searchParams.get('irods_path')?.trim() ?? ''
+  const explorerQuery = searchParams.get('explorer_query')?.trim() ?? ''
+  const explorerReturnQueryString = useMemo(() => {
+    if (!explorerQuery) {
+      return ''
+    }
+
+    const params = new URLSearchParams(explorerQuery)
+    params.delete('explorer_query')
+    return params.toString()
+  }, [explorerQuery])
   const [isAddingAVU, setIsAddingAVU] = useState(false)
   const [avuForm, setAVUForm] = useState({
     attrib: '',
@@ -432,6 +527,11 @@ export function ExplorerDetailsPage() {
   const [deleteDialog, setDeleteDialog] = useState<DeleteDialogState | null>(null)
   const [deleteForce, setDeleteForce] = useState(false)
   const [renameDialog, setRenameDialog] = useState<RenameDialogState | null>(null)
+  const [s3BucketDialog, setS3BucketDialog] = useState<S3BucketDialogState | null>(null)
+  const [s3BucketName, setS3BucketName] = useState('')
+  const [s3BucketAutoGenerate, setS3BucketAutoGenerate] = useState(false)
+  const [s3BucketDeleteDialog, setS3BucketDeleteDialog] = useState<S3Bucket | null>(null)
+  const [relocateDialog, setRelocateDialog] = useState<RelocateDialogState | null>(null)
   const [renameName, setRenameName] = useState('')
   const [commandHintsOpened, setCommandHintsOpened] = useState(false)
   const [storageCommandDetailsOpened, setStorageCommandDetailsOpened] = useState(false)
@@ -445,6 +545,35 @@ export function ExplorerDetailsPage() {
   const [replicaMoveMinCopies, setReplicaMoveMinCopies] = useState('1')
   const [replicaMoveMinAgeMinutes, setReplicaMoveMinAgeMinutes] = useState('0')
 
+  const detailsUrlForPath = (path: string) => {
+    const params = new URLSearchParams({
+      irods_path: path,
+    })
+    if (explorerQuery) {
+      params.set('explorer_query', explorerQuery)
+    }
+    return `/app/explorer/details?${params.toString()}`
+  }
+
+  const navigateToExplorer = (irodsPathOverride?: string) => {
+    if (explorerReturnQueryString) {
+      const params = new URLSearchParams(explorerReturnQueryString)
+      if (irodsPathOverride?.trim()) {
+        params.set('irods_path', irodsPathOverride.trim())
+      }
+      const nextQuery = params.toString()
+      navigate(nextQuery ? `/app/explorer?${nextQuery}` : '/app/explorer')
+      return
+    }
+
+    if (irodsPathOverride?.trim()) {
+      navigate(`/app/explorer?irods_path=${encodeURIComponent(irodsPathOverride.trim())}`)
+      return
+    }
+
+    navigate('/app/explorer')
+  }
+
   const detailsQuery = useQuery({
     queryKey: ['path-detail', irodsPath, connection],
     queryFn: () => getPath(irodsPath, connection.auth, connection.baseUrl, { verbose: 2 }),
@@ -455,7 +584,7 @@ export function ExplorerDetailsPage() {
       return undefined
     }
 
-    return filePreviewSpec(detailsQuery.data.path, detailsQuery.data.mime_type)
+    return filePreviewSpec(detailsQuery.data.path, detailsQuery.data.mime_type, detailsQuery.data.size)
   }, [detailsQuery.data])
   const headerImagePreviewQuery = useQuery({
     queryKey: ['path-preview-thumbnail', irodsPath, connection],
@@ -468,6 +597,20 @@ export function ExplorerDetailsPage() {
     queryFn: () => getPathAVUs(irodsPath, connection.auth, connection.baseUrl),
     enabled: Boolean(irodsPath),
   })
+  const s3BucketQuery = useQuery({
+    queryKey: ['s3-bucket-by-path', irodsPath, connection, s3AdminEnabled],
+    queryFn: async () => {
+      try {
+        return (await getS3BucketByPath(irodsPath, connection.auth, connection.baseUrl)).bucket
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) {
+          return null
+        }
+        throw error
+      }
+    },
+    enabled: Boolean(s3AdminEnabled && irodsPath && detailsQuery.data?.kind === 'collection'),
+  })
   const aclQuery = useQuery({
     queryKey: ['path-acls', irodsPath, connection],
     queryFn: () => getPathACL(irodsPath, connection.auth, connection.baseUrl),
@@ -478,6 +621,24 @@ export function ExplorerDetailsPage() {
     queryFn: () => getResources(connection.auth, connection.baseUrl, { scope: 'top' }),
     enabled: Boolean(irodsPath),
     staleTime: 60_000,
+  })
+  const favoritesQuery = useQuery({
+    queryKey: ['favorites', connection],
+    queryFn: () => getFavorites(connection.auth, connection.baseUrl),
+    staleTime: 60_000,
+  })
+  const relocateBrowsePath = relocateDialog?.browsePath ?? ''
+  const relocateBrowserEntryQuery = useQuery({
+    queryKey: ['path-entry-relocate-details-dialog', relocateBrowsePath, connection],
+    queryFn: () => getPath(relocateBrowsePath, connection.auth, connection.baseUrl),
+    enabled: Boolean(relocateDialog && relocateBrowsePath),
+  })
+  const relocateBrowserChildrenQuery = useQuery({
+    queryKey: ['path-children-relocate-details-dialog', relocateBrowsePath, connection],
+    queryFn: () => getPathChildren(relocateBrowsePath, connection.auth, connection.baseUrl),
+    enabled:
+      relocateBrowserEntryQuery.data?.kind === 'collection' &&
+      relocateBrowserEntryQuery.data.path === relocateBrowsePath,
   })
   const aclPrincipalSearchTerm = aclPrincipalSearchValue.trim()
   const aclPrincipalQuery = useQuery({
@@ -613,6 +774,65 @@ export function ExplorerDetailsPage() {
     onError: (error: Error) => {
       notifications.show({
         title: 'AVU add failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+  const upsertS3BucketMutation = useMutation({
+    mutationFn: (input: {
+      irodsPath: string
+      bucketName?: string
+      autoGenerate?: boolean
+      mode: 'add' | 'update'
+    }) =>
+      upsertS3Bucket(
+        {
+          irods_path: input.irodsPath,
+          bucket_name: input.bucketName,
+          auto_generate: input.autoGenerate,
+        },
+        connection.auth,
+        connection.baseUrl,
+        input.mode === 'update' ? 'PUT' : 'POST',
+      ).then((payload) => ({
+        bucket: payload.bucket,
+        mode: input.mode,
+      })),
+    onSuccess: async ({ bucket, mode }) => {
+      notifications.show({
+        title: mode === 'add' ? 'S3 bucket mapping added' : 'S3 bucket mapping updated',
+        message: `${bucket.bucket_id} -> ${bucket.irods_path}`,
+        color: 'teal',
+      })
+      setS3BucketDialog(null)
+      setS3BucketName('')
+      setS3BucketAutoGenerate(false)
+      await Promise.all([s3BucketQuery.refetch(), avuQuery.refetch()])
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'S3 bucket mapping failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+  const deleteS3BucketMutation = useMutation({
+    mutationFn: (bucket: S3Bucket) =>
+      deleteS3Bucket(bucket.bucket_id, connection.auth, connection.baseUrl).then(() => bucket),
+    onSuccess: async (bucket) => {
+      notifications.show({
+        title: 'S3 bucket mapping deleted',
+        message: bucket.bucket_id,
+        color: 'teal',
+      })
+      setS3BucketDeleteDialog(null)
+      await Promise.all([s3BucketQuery.refetch(), avuQuery.refetch()])
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'S3 bucket mapping delete failed',
         message: error.message,
         color: 'red',
       })
@@ -953,9 +1173,15 @@ export function ExplorerDetailsPage() {
         throw new ApiError(400, 'No delete target was selected.')
       }
 
-      await deletePath(deleteDialog.path, connection.auth, connection.baseUrl, {
-        force: deleteForce,
-      })
+      if (deleteDialog.action) {
+        await deletePathByAction(deleteDialog.action, connection.auth, connection.baseUrl, {
+          force: deleteForce,
+        })
+      } else {
+        await deletePath(deleteDialog.path, connection.auth, connection.baseUrl, {
+          force: deleteForce,
+        })
+      }
 
       return deleteDialog
     },
@@ -969,13 +1195,11 @@ export function ExplorerDetailsPage() {
       setDeleteForce(false)
 
       if (detailsQuery.data?.parent?.irods_path) {
-        navigate(
-          `/app/explorer?irods_path=${encodeURIComponent(detailsQuery.data.parent.irods_path)}`,
-        )
+        navigateToExplorer(detailsQuery.data.parent.irods_path)
         return
       }
 
-      navigate('/app/explorer')
+      navigateToExplorer()
     },
     onError: (error: Error) => {
       if (error instanceof ApiError && error.status === 409) {
@@ -1006,11 +1230,17 @@ export function ExplorerDetailsPage() {
         throw new ApiError(400, 'Enter a new name.')
       }
 
+      const payload = {
+        new_name: newName,
+      }
+
+      if (renameDialog.action) {
+        return renamePathByAction(renameDialog.action, payload, connection.auth, connection.baseUrl)
+      }
+
       return renamePath(
         renameDialog.path,
-        {
-          new_name: newName,
-        },
+        payload,
         connection.auth,
         connection.baseUrl,
       )
@@ -1023,13 +1253,142 @@ export function ExplorerDetailsPage() {
       })
       setRenameDialog(null)
       setRenameName('')
-      navigate(`/app/explorer/details?irods_path=${encodeURIComponent(renamed.path)}`, {
+      navigate(detailsUrlForPath(renamed.path), {
         replace: true,
       })
     },
     onError: (error: Error) => {
       notifications.show({
         title: 'Rename failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+  const relocatePathMutation = useMutation({
+    mutationFn: async (input: {
+      operation: RelocateOperation
+      sourcePath: string
+      destinationCollectionPath: string
+    }) => {
+      const destinationCollectionPath = normalizeCollectionPath(input.destinationCollectionPath)
+      if (!destinationCollectionPath) {
+        throw new ApiError(400, 'Destination path must be an absolute collection path.')
+      }
+
+      const destinationPath = destinationPathForSource(input.sourcePath, destinationCollectionPath)
+      if (!destinationPath) {
+        throw new ApiError(400, 'Unable to derive destination path.')
+      }
+
+      let result: PathEntry
+      const sourceEntry = detailsQuery.data
+      const action = sourceEntry ? relocateActionForEntry(sourceEntry, input.operation) : undefined
+      if (action) {
+        result = await relocatePathByAction(
+          action,
+          {
+            operation: input.operation,
+            destination_path: destinationPath,
+          },
+          connection.auth,
+          connection.baseUrl,
+        )
+      } else {
+        result = await relocatePath(
+          input.sourcePath,
+          {
+            operation: input.operation,
+            destination_path: destinationPath,
+          },
+          connection.auth,
+          connection.baseUrl,
+        )
+      }
+
+      return {
+        result,
+        destinationCollectionPath,
+      }
+    },
+    onSuccess: (payload, variables) => {
+      notifications.show({
+        title: variables.operation === 'copy' ? 'Copy complete' : 'Move complete',
+        message: payload.result.path,
+        color: 'teal',
+      })
+      setRelocateDialog(null)
+      navigate(`/app/explorer?irods_path=${encodeURIComponent(payload.destinationCollectionPath)}`)
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'Relocate failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+  const addFavoriteMutation = useMutation({
+    mutationFn: async (input: { path: string; defaultName: string }) => {
+      const action = favoritesQuery.data?.links?.create
+      if (!action) {
+        throw new ApiError(405, 'Favorite add action is unavailable.')
+      }
+
+      return addFavorite(
+        action,
+        {
+          name: input.defaultName,
+          absolute_path: input.path,
+        },
+        connection.auth,
+        connection.baseUrl,
+      )
+    },
+    onSuccess: async (_, variables) => {
+      notifications.show({
+        title: 'Favorite added',
+        message: variables.path,
+        color: 'teal',
+      })
+      await favoritesQuery.refetch()
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'Favorite add failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+  const removeFavoriteMutation = useMutation({
+    mutationFn: async (favorite: FavoriteEntry) => {
+      const action = favorite.links?.delete ?? favoritesQuery.data?.links?.delete
+      if (!action) {
+        throw new ApiError(405, 'Favorite remove action is unavailable.')
+      }
+
+      await removeFavorite(
+        action,
+        {
+          absolute_path: favorite.absolute_path,
+        },
+        connection.auth,
+        connection.baseUrl,
+      )
+      return favorite
+    },
+    onSuccess: async (favorite) => {
+      notifications.show({
+        title: 'Favorite removed',
+        message: favorite.absolute_path,
+        color: 'teal',
+      })
+      await favoritesQuery.refetch()
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'Favorite remove failed',
         message: error.message,
         color: 'red',
       })
@@ -1047,6 +1406,14 @@ export function ExplorerDetailsPage() {
   const aclEntries = useMemo(
     () => [...(aclQuery.data?.users ?? []), ...(aclQuery.data?.groups ?? [])],
     [aclQuery.data],
+  )
+  const favorites = useMemo(
+    () => favoritesQuery.data?.favorites ?? [],
+    [favoritesQuery.data?.favorites],
+  )
+  const currentFavorite = useMemo(
+    () => favorites.find((favorite) => favorite.absolute_path === detailsQuery.data?.path),
+    [favorites, detailsQuery.data?.path],
   )
   const replicaResourceOptions = useMemo(() => {
     const resources = new Set<string>()
@@ -1084,6 +1451,7 @@ export function ExplorerDetailsPage() {
   const hasCommandHints = commandCues.length > 0
   const isCollection = detailsQuery.data?.kind === 'collection'
   const isDataObject = detailsQuery.data?.kind === 'data_object'
+  const currentS3Bucket = s3BucketQuery.data ?? null
   const selectedReplicaMoveSourceResource = useMemo(() => {
     const current = replicaMoveSourceResource?.trim() ?? ''
     if (current && replicaResourceOptions.some((entry) => entry.value === current)) {
@@ -1131,6 +1499,17 @@ export function ExplorerDetailsPage() {
   const deleteReturnPath = useMemo(
     () => detailsQuery.data?.parent?.irods_path ?? '',
     [detailsQuery.data],
+  )
+  const relocateBrowserChildren =
+    relocateBrowserChildrenQuery.data?.irods_path === relocateBrowsePath
+      ? (relocateBrowserChildrenQuery.data.children ?? []).filter((child) => child.kind === 'collection')
+      : []
+  const relocateBrowserBreadcrumbs =
+    relocateBrowserChildrenQuery.data?.path_segments ??
+    relocateBrowserEntryQuery.data?.path_segments ??
+    []
+  const relocateDestinationPath = normalizeCollectionPath(
+    relocateDialog?.destinationPathDraft ?? '',
   )
 
   const storageCommandSourcePlaceholder = selectedStorageCommandSourceResource.trim()
@@ -1247,6 +1626,72 @@ export function ExplorerDetailsPage() {
         },
       },
     )
+  }
+
+  const beginS3BucketAdd = () => {
+    const path = detailsQuery.data?.path
+    if (!path || detailsQuery.data?.kind !== 'collection') {
+      return
+    }
+
+    setS3BucketDialog({
+      mode: 'add',
+      path,
+    })
+    setS3BucketName(defaultS3BucketNameForPath(path))
+    setS3BucketAutoGenerate(false)
+  }
+
+  const beginS3BucketUpdate = () => {
+    const path = detailsQuery.data?.path
+    if (!path || detailsQuery.data?.kind !== 'collection' || !currentS3Bucket) {
+      return
+    }
+
+    setS3BucketDialog({
+      mode: 'update',
+      path,
+      currentBucketId: currentS3Bucket.bucket_id,
+    })
+    setS3BucketName(currentS3Bucket.bucket_id)
+    setS3BucketAutoGenerate(false)
+  }
+
+  const cancelS3BucketDialog = () => {
+    setS3BucketDialog(null)
+    setS3BucketName('')
+    setS3BucketAutoGenerate(false)
+  }
+
+  const submitS3BucketDialog = () => {
+    if (!s3BucketDialog) {
+      return
+    }
+
+    const bucketName = s3BucketName.trim()
+    if (!bucketName && !s3BucketAutoGenerate) {
+      notifications.show({
+        title: 'S3 bucket name is required',
+        message: 'Enter a bucket name or enable generated bucket name.',
+        color: 'red',
+      })
+      return
+    }
+
+    upsertS3BucketMutation.mutate({
+      irodsPath: s3BucketDialog.path,
+      bucketName: s3BucketAutoGenerate ? undefined : bucketName,
+      autoGenerate: s3BucketAutoGenerate,
+      mode: s3BucketDialog.mode,
+    })
+  }
+
+  const beginS3BucketDelete = () => {
+    if (!currentS3Bucket) {
+      return
+    }
+
+    setS3BucketDeleteDialog(currentS3Bucket)
   }
 
   const beginACLAdd = () => {
@@ -1536,6 +1981,7 @@ export function ExplorerDetailsPage() {
       path: detailsQuery.data.path,
       label: displayName(detailsQuery.data.path),
       kind: detailsQuery.data.kind,
+      action: detailsQuery.data.links?.delete,
     })
     setDeleteForce(requiresForce)
   }
@@ -1550,8 +1996,89 @@ export function ExplorerDetailsPage() {
       path: detailsQuery.data.path,
       label,
       kind: detailsQuery.data.kind,
+      action: detailsQuery.data.links?.update,
     })
     setRenameName(label)
+  }
+
+  const openRelocateDialog = (operation: RelocateOperation) => {
+    if (!detailsQuery.data) {
+      return
+    }
+
+    const defaultDestination =
+      detailsQuery.data.kind === 'collection'
+        ? detailsQuery.data.parent?.irods_path ?? '/'
+        : detailsQuery.data.parent?.irods_path ?? '/'
+
+    const normalizedDestination = normalizeCollectionPath(defaultDestination) || '/'
+
+    setRelocateDialog({
+      operation,
+      browsePath: normalizedDestination,
+      destinationPathDraft: normalizedDestination,
+    })
+  }
+
+  const browseRelocatePath = (nextPath: string) => {
+    const normalized = normalizeCollectionPath(nextPath)
+    if (!normalized) {
+      notifications.show({
+        title: 'Invalid path',
+        message: 'Destination path must be absolute.',
+        color: 'red',
+      })
+      return
+    }
+
+    setRelocateDialog((current) =>
+      current
+        ? {
+            ...current,
+            browsePath: normalized,
+            destinationPathDraft: normalized,
+          }
+        : current,
+    )
+  }
+
+  const submitRelocate = () => {
+    if (!relocateDialog || !detailsQuery.data) {
+      return
+    }
+
+    const destinationCollectionPath = normalizeCollectionPath(relocateDialog.destinationPathDraft)
+    if (!destinationCollectionPath) {
+      notifications.show({
+        title: 'Destination is invalid',
+        message: 'Enter an absolute destination collection path.',
+        color: 'red',
+      })
+      return
+    }
+
+    relocatePathMutation.mutate({
+      operation: relocateDialog.operation,
+      sourcePath: detailsQuery.data.path,
+      destinationCollectionPath,
+    })
+  }
+
+  const toggleFavorite = () => {
+    const path = detailsQuery.data?.path
+    if (!path) {
+      return
+    }
+
+    if (currentFavorite) {
+      removeFavoriteMutation.mutate(currentFavorite)
+      return
+    }
+
+    addFavoriteMutation.mutate({
+      path,
+      defaultName: displayName(path),
+    })
   }
 
   const submitReplicaAdd = () => {
@@ -1741,6 +2268,240 @@ export function ExplorerDetailsPage() {
       </Modal>
 
       <Modal
+        opened={s3BucketDialog !== null}
+        onClose={() => {
+          if (!upsertS3BucketMutation.isPending) {
+            cancelS3BucketDialog()
+          }
+        }}
+        title={
+          s3BucketDialog?.mode === 'update'
+            ? 'Update S3 bucket mapping'
+            : 'Add S3 bucket mapping'
+        }
+        centered
+      >
+        <Stack gap="md">
+          <Text size="sm" c="dimmed">
+            Collection
+          </Text>
+          <Code className="details-inline-code">{s3BucketDialog?.path ?? ''}</Code>
+
+          {s3BucketDialog?.mode === 'update' && s3BucketDialog.currentBucketId ? (
+            <Text size="sm" c="dimmed">
+              Current bucket: <Code>{s3BucketDialog.currentBucketId}</Code>
+            </Text>
+          ) : null}
+
+          {s3BucketDialog?.mode === 'add' ? (
+            <Checkbox
+              label="Generate bucket name"
+              checked={s3BucketAutoGenerate}
+              onChange={(event) => setS3BucketAutoGenerate(event.currentTarget.checked)}
+            />
+          ) : null}
+
+          <TextInput
+            label="Bucket name"
+            value={s3BucketName}
+            onChange={(event) => setS3BucketName(event.currentTarget.value)}
+            disabled={s3BucketDialog?.mode === 'add' && s3BucketAutoGenerate}
+            autoFocus
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                submitS3BucketDialog()
+              }
+            }}
+          />
+
+          <Group justify="flex-end">
+            <Button
+              variant="default"
+              onClick={cancelS3BucketDialog}
+              disabled={upsertS3BucketMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={submitS3BucketDialog}
+              loading={upsertS3BucketMutation.isPending}
+            >
+              {s3BucketDialog?.mode === 'update' ? 'Update mapping' : 'Add mapping'}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={s3BucketDeleteDialog !== null}
+        onClose={() => {
+          if (!deleteS3BucketMutation.isPending) {
+            setS3BucketDeleteDialog(null)
+          }
+        }}
+        title="Delete S3 bucket mapping"
+        centered
+      >
+        <Stack gap="md">
+          <Text>
+            Delete S3 bucket mapping <strong>{s3BucketDeleteDialog?.bucket_id}</strong>?
+          </Text>
+          <Code className="details-inline-code">{s3BucketDeleteDialog?.irods_path ?? ''}</Code>
+
+          <Group justify="flex-end">
+            <Button
+              variant="default"
+              onClick={() => setS3BucketDeleteDialog(null)}
+              disabled={deleteS3BucketMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              color="red"
+              onClick={() => {
+                if (s3BucketDeleteDialog) {
+                  deleteS3BucketMutation.mutate(s3BucketDeleteDialog)
+                }
+              }}
+              loading={deleteS3BucketMutation.isPending}
+            >
+              Delete mapping
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={relocateDialog !== null}
+        onClose={() => {
+          if (!relocatePathMutation.isPending) {
+            setRelocateDialog(null)
+          }
+        }}
+        title={relocateDialog?.operation === 'copy' ? 'Copy item' : 'Move item'}
+        centered
+        size="lg"
+      >
+        <Stack gap="md">
+          <Text size="sm" c="dimmed">
+            Source path
+          </Text>
+          <Text size="sm" className="explorer-hover-path">
+            {detailsQuery.data?.path ?? ''}
+          </Text>
+
+          <TextInput
+            label="Destination collection path"
+            value={relocateDialog?.destinationPathDraft ?? ''}
+            onChange={(event) =>
+              setRelocateDialog((current) =>
+                current
+                  ? {
+                      ...current,
+                      destinationPathDraft: event.currentTarget.value,
+                    }
+                  : current,
+              )
+            }
+            placeholder="/tempZone/home/user/target"
+          />
+
+          <Group gap="xs">
+            <Button
+              variant="light"
+              onClick={() => browseRelocatePath(relocateDialog?.destinationPathDraft ?? '')}
+              disabled={relocatePathMutation.isPending}
+            >
+              Browse destination
+            </Button>
+            <Text size="sm" c="dimmed" className="explorer-hover-path">
+              {relocateDestinationPath || 'No destination selected'}
+            </Text>
+          </Group>
+
+          <Breadcrumbs>
+            {relocateBrowserBreadcrumbs.map((crumb) => (
+              <Button
+                key={`relocate-details-${crumb.irods_path}`}
+                variant="subtle"
+                size="xs"
+                onClick={() => browseRelocatePath(crumb.irods_path)}
+              >
+                {crumb.display_name}
+              </Button>
+            ))}
+          </Breadcrumbs>
+
+          {relocateBrowserEntryQuery.isLoading || relocateBrowserChildrenQuery.isLoading ? (
+            <Group justify="center" py="sm">
+              <Loader size="sm" />
+            </Group>
+          ) : null}
+
+          {relocateBrowserEntryQuery.isError ? (
+            <Alert color="red" variant="light" title="Unable to open destination path">
+              {relocateBrowserEntryQuery.error.message}
+            </Alert>
+          ) : null}
+
+          {relocateBrowserEntryQuery.data && relocateBrowserEntryQuery.data.kind !== 'collection' ? (
+            <Alert color="yellow" variant="light" title="Destination is not a collection">
+              Choose a collection path for move/copy destination.
+            </Alert>
+          ) : null}
+
+          {relocateBrowserChildren.length ? (
+            <Table highlightOnHover verticalSpacing="xs">
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Folder</Table.Th>
+                  <Table.Th w={120}></Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {relocateBrowserChildren.map((child) => (
+                  <Table.Tr key={`relocate-details-child-${child.path}`}>
+                    <Table.Td>
+                      <Text size="sm">
+                        {child.path_segments.at(-1)?.display_name ?? displayName(child.path)}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Button
+                        size="xs"
+                        variant="light"
+                        onClick={() => browseRelocatePath(child.path)}
+                      >
+                        Open
+                      </Button>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          ) : null}
+
+          <Group justify="flex-end">
+            <Button
+              variant="default"
+              onClick={() => setRelocateDialog(null)}
+              disabled={relocatePathMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={submitRelocate}
+              loading={relocatePathMutation.isPending}
+              disabled={!relocateDestinationPath || !detailsQuery.data}
+            >
+              {relocateDialog?.operation === 'copy' ? 'Copy' : 'Move'}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
         opened={commandHintsOpened}
         onClose={() => setCommandHintsOpened(false)}
         title="Command hints"
@@ -1917,22 +2678,35 @@ export function ExplorerDetailsPage() {
       <Card shadow="sm" radius="xl" padding="lg">
         <Stack gap="md">
           <Group justify="space-between" align="center">
-            <div>
+            <Group gap="sm" align="center">
+              {detailsQuery.data ? (
+                <ThemeIcon
+                  variant="light"
+                  color={detailsQuery.data.kind === 'collection' ? 'blue' : 'teal'}
+                  size="lg"
+                >
+                  {detailsQuery.data.kind === 'collection' ? (
+                    <IconFolder size={18} />
+                  ) : (
+                    <IconFile size={18} />
+                  )}
+                </ThemeIcon>
+              ) : null}
               <Title order={2}>
-                {detailsQuery.data?.kind === 'collection' ? 'Folder details' : 'File details'}
+                {detailsQuery.data ? displayName(detailsQuery.data.path) : 'Details'}
               </Title>
-            </div>
+            </Group>
 
             <Button
               variant="subtle"
               leftSection={<IconArrowLeft size={16} />}
               onClick={() => {
                 if (backPath) {
-                  navigate(`/app/explorer?irods_path=${encodeURIComponent(backPath)}`)
+                  navigateToExplorer(backPath)
                   return
                 }
 
-                navigate('/app/explorer')
+                navigateToExplorer()
               }}
             >
               Back to explorer
@@ -1945,9 +2719,7 @@ export function ExplorerDetailsPage() {
                 key={crumb.irods_path}
                 variant="subtle"
                 size="xs"
-                onClick={() =>
-                  navigate(`/app/explorer?irods_path=${encodeURIComponent(crumb.irods_path)}`)
-                }
+                onClick={() => navigateToExplorer(crumb.irods_path)}
               >
                 {crumb.display_name}
               </Button>
@@ -1978,29 +2750,11 @@ export function ExplorerDetailsPage() {
                   <Stack gap="md">
                     <Group justify="space-between" align="flex-start">
                       <Group gap="sm" align="flex-start" className="details-header-main">
-                        <ThemeIcon
-                          variant="light"
-                          color={detailsQuery.data.kind === 'collection' ? 'blue' : 'teal'}
-                          size="xl"
-                        >
-                          {detailsQuery.data.kind === 'collection' ? (
-                            <IconFolder size={20} />
-                          ) : (
-                            <IconFile size={20} />
-                          )}
-                        </ThemeIcon>
                         <Group
                           justify="space-between"
                           align="flex-start"
                           className="details-header-copy"
                         >
-                          <div>
-                            <Title order={3}>{displayName(detailsQuery.data.path)}</Title>
-                            <Text c="dimmed">
-                              {detailsQuery.data.parent?.irods_path ?? 'Path root'}
-                            </Text>
-                          </div>
-
                           <Group gap="xs">
                             <Badge variant="light" color="blue">
                               {detailsQuery.data.kind}
@@ -2008,6 +2762,16 @@ export function ExplorerDetailsPage() {
                             <Badge variant="dot" color="gray">
                               {detailsQuery.data.zone}
                             </Badge>
+                            <ActionIcon
+                              variant={currentFavorite ? 'filled' : 'light'}
+                              color={currentFavorite ? 'yellow' : 'gray'}
+                              aria-label={currentFavorite ? 'Remove favorite' : 'Add favorite'}
+                              onClick={toggleFavorite}
+                              loading={addFavoriteMutation.isPending || removeFavoriteMutation.isPending}
+                              disabled={!favoritesQuery.data?.links?.create && !currentFavorite?.links?.delete && !favoritesQuery.data?.links?.delete}
+                            >
+                              {currentFavorite ? <IconStarFilled size={16} /> : <IconStar size={16} />}
+                            </ActionIcon>
                             <Button
                               size="xs"
                               variant="default"
@@ -2017,6 +2781,50 @@ export function ExplorerDetailsPage() {
                             >
                               Command hints
                             </Button>
+                            {s3AdminEnabled && isCollection ? (
+                              <Menu position="bottom-end" width={260} shadow="md">
+                                <Menu.Target>
+                                  <Button
+                                    size="xs"
+                                    variant="light"
+                                    leftSection={<IconDatabase size={14} />}
+                                  >
+                                    Tools
+                                  </Button>
+                                </Menu.Target>
+                                <Menu.Dropdown>
+                                  <Menu.Label>S3 bucket mapping</Menu.Label>
+                                  {s3BucketQuery.isLoading ? (
+                                    <Menu.Item disabled>Loading mapping...</Menu.Item>
+                                  ) : s3BucketQuery.isError ? (
+                                    <Menu.Item disabled>Mapping status unavailable</Menu.Item>
+                                  ) : currentS3Bucket ? (
+                                    <>
+                                      <Menu.Item
+                                        leftSection={<IconEdit size={14} />}
+                                        onClick={beginS3BucketUpdate}
+                                      >
+                                        Update S3 bucket mapping
+                                      </Menu.Item>
+                                      <Menu.Item
+                                        color="red"
+                                        leftSection={<IconTrash size={14} />}
+                                        onClick={beginS3BucketDelete}
+                                      >
+                                        Delete S3 bucket mapping
+                                      </Menu.Item>
+                                    </>
+                                  ) : (
+                                    <Menu.Item
+                                      leftSection={<IconPlus size={14} />}
+                                      onClick={beginS3BucketAdd}
+                                    >
+                                      Add S3 bucket mapping
+                                    </Menu.Item>
+                                  )}
+                                </Menu.Dropdown>
+                              </Menu>
+                            ) : null}
                           </Group>
                         </Group>
                       </Group>
@@ -2074,11 +2882,15 @@ export function ExplorerDetailsPage() {
                           type="button"
                           className="details-preview-tile"
                           disabled={!headerPreviewSpec.canOpenPreview}
-                          onClick={() =>
-                            navigate(
-                              `/app/explorer/preview?irods_path=${encodeURIComponent(detailsQuery.data.path)}`,
-                            )
-                          }
+                          onClick={() => {
+                            const params = new URLSearchParams({
+                              irods_path: detailsQuery.data.path,
+                            })
+                            if (explorerQuery) {
+                              params.set('explorer_query', explorerQuery)
+                            }
+                            navigate(`/app/explorer/preview?${params.toString()}`)
+                          }}
                         >
                           <div className="details-preview-media">
                             {headerPreviewSpec.kind === 'image' ? (
@@ -2152,6 +2964,19 @@ export function ExplorerDetailsPage() {
                     </Button>
                     <Button
                       variant="light"
+                      onClick={() => openRelocateDialog('move')}
+                    >
+                      Move {detailsQuery.data.kind === 'collection' ? 'folder' : 'file'}
+                    </Button>
+                    <Button
+                      variant="light"
+                      leftSection={<IconCopy size={14} />}
+                      onClick={() => openRelocateDialog('copy')}
+                    >
+                      Copy {detailsQuery.data.kind === 'collection' ? 'folder' : 'file'}
+                    </Button>
+                    <Button
+                      variant="light"
                       color="red"
                       leftSection={<IconTrash size={14} />}
                       onClick={beginPathDelete}
@@ -2161,11 +2986,7 @@ export function ExplorerDetailsPage() {
                     {isCollection ? (
                       <Button
                         variant="light"
-                        onClick={() =>
-                          navigate(
-                            `/app/explorer?irods_path=${encodeURIComponent(detailsQuery.data.path)}`,
-                          )
-                        }
+                        onClick={() => navigateToExplorer(detailsQuery.data.path)}
                       >
                         Open collection
                       </Button>
@@ -2173,11 +2994,7 @@ export function ExplorerDetailsPage() {
                     {detailsQuery.data.parent ? (
                       <Button
                         variant="light"
-                        onClick={() =>
-                          navigate(
-                            `/app/explorer?irods_path=${encodeURIComponent(detailsQuery.data.parent!.irods_path)}`,
-                          )
-                        }
+                        onClick={() => navigateToExplorer(detailsQuery.data.parent!.irods_path)}
                       >
                         Open parent collection
                       </Button>

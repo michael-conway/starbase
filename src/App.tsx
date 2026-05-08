@@ -22,44 +22,16 @@ import { useQuery } from '@tanstack/react-query'
 import {
   IconInfoCircle,
   IconLogout,
+  IconSettings,
   IconTool,
   IconUserCircle,
 } from '@tabler/icons-react'
 import { primarySections } from './app-sections'
 import { defaultPath } from './features/explorer'
-import { getHealth, getServiceInfo } from './lib/irods-rest'
+import { userFromOIDCToken } from './features/identity'
+import { getFavorites, getHealth, getServiceInfo } from './lib/irods-rest'
+import { useAppConfig } from './providers/use-app-config'
 import { useSession } from './providers/use-session'
-
-function userFromOIDCToken(token: string) {
-  const payload = token.split('.')[1]
-  if (!payload) {
-    return ''
-  }
-
-  try {
-    const normalizedPayload = payload.replace(/-/g, '+').replace(/_/g, '/')
-    const paddedPayload = normalizedPayload.padEnd(
-      normalizedPayload.length + ((4 - (normalizedPayload.length % 4)) % 4),
-      '=',
-    )
-    const decoded = JSON.parse(window.atob(paddedPayload)) as {
-      preferred_username?: string
-      irods_user_name?: string
-      email?: string
-      sub?: string
-    }
-
-    return (
-      decoded.irods_user_name?.trim() ||
-      decoded.preferred_username?.trim() ||
-      decoded.email?.trim() ||
-      decoded.sub?.trim() ||
-      ''
-    )
-  } catch {
-    return ''
-  }
-}
 
 function zoneFromSearch(search: string) {
   const params = new URLSearchParams(search)
@@ -97,7 +69,8 @@ function asObject(value: unknown): Record<string, unknown> {
 }
 
 function App() {
-  const { basicUsername, clearSession, connection, oidcToken } = useSession()
+  const appConfig = useAppConfig()
+  const { basicUsername, clearSession, connection, isAuthenticated, oidcToken } = useSession()
   const location = useLocation()
   const [menuOpened, setMenuOpened] = useState(false)
   const [serviceInfoOpened, setServiceInfoOpened] = useState(false)
@@ -113,12 +86,20 @@ function App() {
     enabled: serviceInfoOpened,
     staleTime: 60_000,
   })
+  useQuery({
+    queryKey: ['favorites', connection],
+    queryFn: () => getFavorites(connection.auth, connection.baseUrl),
+    enabled: isAuthenticated,
+    staleTime: 60_000,
+  })
   const currentUser =
     connection.auth.mode === 'basic'
       ? basicUsername || 'Unknown user'
       : userFromOIDCToken(oidcToken) || 'OIDC user'
   const currentZone = zoneFromSearch(location.search)
   const authModeLabel = connection.auth.mode === 'basic' ? 'Basic auth' : 'OIDC'
+  const appTitle = appConfig.config.title?.trim() || 'Starbase'
+  const appSubtitle = appConfig.config.subtitle?.trim() || 'iRODS Explorer'
   const servicePayload = asObject(serviceInfoQuery.data)
   const serverInfo = asObject(servicePayload.server_info)
   const normalizedServerInfo = Object.keys(serverInfo).length > 0 ? serverInfo : servicePayload
@@ -313,10 +294,10 @@ function App() {
                   size="sm"
                   aria-label={menuOpened ? 'Hide main menu' : 'Show main menu'}
                 />
-                <Title order={2}>starbase</Title>
+                <Title order={2}>{appTitle}</Title>
               </Group>
               <Text size="sm" c="dimmed">
-                iRODS Explorer
+                {appSubtitle}
               </Text>
             </div>
 
@@ -355,6 +336,14 @@ function App() {
 
                   <Menu.Dropdown>
                     <Menu.Label>Tools</Menu.Label>
+                    <Menu.Item
+                      component={NavLink}
+                      to="/app/settings"
+                      leftSection={<IconSettings size={16} />}
+                    >
+                      Settings
+                    </Menu.Item>
+                    <Menu.Divider />
                     <Menu.Item
                       component="a"
                       href="https://irods.org/download/"
@@ -437,7 +426,7 @@ function App() {
               Workspace
             </Text>
             <Text size="sm" mt={4}>
-              iRODS Explorer
+              {appSubtitle}
             </Text>
           </div>
 

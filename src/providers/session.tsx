@@ -23,6 +23,7 @@ const secretsStorageKey = 'starbase.session'
 const defaultPreferences: StoredPreferences = {
   authMode: 'basic',
   baseUrl: '',
+  basicAuthType: 'native',
 }
 
 const defaultSecrets: SessionSecretState = {
@@ -50,9 +51,21 @@ function readSessionStorage<T>(key: string, fallback: T): T {
 }
 
 export function SessionProvider({ children }: { children: ReactNode }) {
-  const [preferences, setPreferences] = useState<StoredPreferences>(() =>
-    readLocalStorage(preferencesStorageKey, defaultPreferences),
-  )
+  const [preferences, setPreferences] = useState<StoredPreferences>(() => {
+    const stored = readLocalStorage<StoredPreferences | Partial<StoredPreferences>>(
+      preferencesStorageKey,
+      defaultPreferences,
+    )
+
+    return {
+      ...defaultPreferences,
+      ...stored,
+      basicAuthType:
+        typeof stored.basicAuthType === 'string' && stored.basicAuthType.trim()
+          ? stored.basicAuthType.trim()
+          : defaultPreferences.basicAuthType,
+    }
+  })
   const [secrets, setSecrets] = useState<SessionSecretState>(() =>
     readSessionStorage(secretsStorageKey, defaultSecrets),
   )
@@ -72,6 +85,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             mode: 'basic',
             username: secrets.username,
             password: secrets.password,
+            basicAuthType: preferences.basicAuthType,
           }
         : {
             mode: 'oidc',
@@ -96,10 +110,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       preferences,
       oidcToken: secrets.token,
       basicUsername: secrets.username,
-      signInBasic: ({ username, password, baseUrl }) => {
+      signInBasic: ({ username, password, baseUrl, basicAuthType }) => {
         setPreferences({
           authMode: 'basic',
           baseUrl: baseUrl.trim(),
+          basicAuthType: basicAuthType.trim() || defaultPreferences.basicAuthType,
         })
         setSecrets({
           token: '',
@@ -111,6 +126,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         setPreferences({
           authMode: 'oidc',
           baseUrl: baseUrl.trim(),
+          basicAuthType: preferences.basicAuthType,
         })
         setSecrets({
           token: token.trim(),

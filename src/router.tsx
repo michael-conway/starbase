@@ -6,6 +6,7 @@ import { ExplorerDetailsPage } from './pages/ExplorerDetailsPage'
 import { ExplorerPreviewPage } from './pages/ExplorerPreviewPage'
 import { LoginPage } from './pages/LoginPage'
 import { ResourceDetailsPage } from './pages/ResourceDetailsPage'
+import { SettingsPage } from './pages/SettingsPage'
 import { SetupPage } from './pages/SetupPage'
 import { HomeRedirect, RequireSession, RouteFallback } from './router-components'
 
@@ -66,6 +67,10 @@ export const router = createBrowserRouter([
           {
             path: 'resources/details',
             element: <ResourceDetailsPage />,
+          },
+          {
+            path: 'settings',
+            element: <SettingsPage />,
           },
           {
             path: 'setup',
