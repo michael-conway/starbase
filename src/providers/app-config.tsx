@@ -22,16 +22,19 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
     let isCancelled = false
 
     const load = async () => {
+      console.info(`[starbase] Loading startup config from ${configPath}`)
       try {
         const loaded = await loadStarbaseConfig(configPath)
         if (!isCancelled) {
           setConfig(loaded)
           setError(null)
         }
+        console.info(`[starbase] Loaded startup config from ${configPath}`)
       } catch (loadError) {
+        const message =
+          loadError instanceof Error ? loadError.message : 'Unable to load startup configuration'
+        console.warn(`[starbase] ${message}. Falling back to defaults.`)
         if (!isCancelled) {
-          const message =
-            loadError instanceof Error ? loadError.message : 'Unable to load startup configuration'
           setError(message)
           setConfig(defaultStarbaseConfig)
         }

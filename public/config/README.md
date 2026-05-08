@@ -1,10 +1,14 @@
 # Starbase Runtime Config
 
 - Default file loaded at startup: `/config/starbase.yaml`
-- Optional environment override:
-  - Set `STARBASE_CONFIG_ENV=<name>`
-  - Startup file becomes `/config/starbase.<name>.yaml`
-  - Example: `STARBASE_CONFIG_ENV=dev` loads `/config/starbase.dev.yaml`
+- Optional direct path override:
+  - Set `VITE_STARBASE_CONFIG_PATH=<path>`
+  - Startup file becomes `<path>`
+  - Example: `VITE_STARBASE_CONFIG_PATH=/config/starbase.niehs.yaml`
+- Path must be browser-reachable:
+  - Valid: `/config/starbase.niehs.yaml`
+  - Valid: `https://example.org/config/starbase.yaml`
+  - Invalid: local filesystem paths like `/Users/.../starbase.yaml`
 
 Supported keys:
 

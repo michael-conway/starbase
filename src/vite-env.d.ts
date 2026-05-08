@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  readonly STARBASE_CONFIG_ENV?: string
+  readonly VITE_STARBASE_CONFIG_PATH?: string
 }
 
 interface ImportMeta {

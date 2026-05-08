@@ -7,7 +7,6 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
-    envPrefix: ['VITE_', 'STARBASE_'],
     server: {
       proxy: {
         '/api': target,

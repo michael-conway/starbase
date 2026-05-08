@@ -211,17 +211,47 @@ export function parseStarbaseYamlConfig(yaml: string): StarbaseConfig {
   }
 }
 
-function configPathForEnvironment(configEnv?: string) {
-  const normalizedEnv = configEnv?.trim()
-  if (!normalizedEnv) {
-    return '/config/starbase.yaml'
-  }
+const defaultConfigPath = '/config/starbase.yaml'
 
-  return `/config/starbase.${normalizedEnv}.yaml`
+function looksLikeFilesystemPath(value: string) {
+  const normalized = value.trim()
+  return (
+    normalized.startsWith('/Users/') ||
+    normalized.startsWith('/home/') ||
+    normalized.startsWith('/var/') ||
+    /^[A-Za-z]:[\\/]/.test(normalized)
+  )
+}
+
+function isSupportedConfigPath(value: string) {
+  return (
+    value.startsWith('/') ||
+    value.startsWith('http://') ||
+    value.startsWith('https://')
+  )
 }
 
 export function resolveStarbaseConfigPath() {
-  return configPathForEnvironment(import.meta.env.STARBASE_CONFIG_ENV)
+  const configured = import.meta.env.VITE_STARBASE_CONFIG_PATH?.trim()
+  if (!configured) {
+    return defaultConfigPath
+  }
+
+  if (looksLikeFilesystemPath(configured)) {
+    console.warn(
+      `[starbase] Ignoring VITE_STARBASE_CONFIG_PATH=${configured} because browser config must be an HTTP(S) or site-relative path.`,
+    )
+    return defaultConfigPath
+  }
+
+  if (isSupportedConfigPath(configured)) {
+    return configured
+  }
+
+  console.warn(
+    `[starbase] Ignoring VITE_STARBASE_CONFIG_PATH=${configured} because it is not an HTTP(S) or site-relative path.`,
+  )
+  return defaultConfigPath
 }
 
 export async function loadStarbaseConfig(path = resolveStarbaseConfigPath()) {

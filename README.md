@@ -190,11 +190,21 @@ At browser startup, `starbase` loads YAML configuration from:
 /config/starbase.yaml
 ```
 
-Set `STARBASE_CONFIG_ENV=<name>` at build time to load:
+Set `VITE_STARBASE_CONFIG_PATH=<path>` at build time to load an explicit config file:
 
 ```text
-/config/starbase.<name>.yaml
+<path>
 ```
+
+Example:
+
+```text
+/config/starbase.niehs.yaml
+```
+
+Only browser-reachable paths are valid (site-relative `/config/...` or absolute
+`http(s)://...` URLs). Filesystem paths like `/Users/...` are ignored and the
+app falls back to `/config/starbase.yaml`.
 
 Supported config keys:
 
@@ -320,7 +330,7 @@ Supported frontend environment variables:
 
 * `VITE_PROXY_TARGET`: dev server proxy target, defaulting to `http://localhost:8080`
 * `VITE_API_BASE_URL`: production bundle default API base URL
-* `STARBASE_CONFIG_ENV`: runtime config suffix for `/config/starbase.<name>.yaml`
+* `VITE_STARBASE_CONFIG_PATH`: runtime config path override (for example `/config/starbase.niehs.yaml`)
 
 Supported integration test environment variables:
 

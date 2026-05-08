@@ -5,6 +5,7 @@ import {
   Button,
   Card,
   Code,
+  Grid,
   Group,
   Loader,
   Stack,
@@ -398,6 +399,38 @@ export function SettingsPage() {
           Settings sections are controlled by Starbase runtime configuration.
         </Alert>
       ) : null}
+
+      <Alert
+        color={appConfig.error ? 'yellow' : 'blue'}
+        variant="light"
+        title={appConfig.error ? 'Startup config fallback' : 'Startup config'}
+      >
+        <Grid gap="xs" align="center">
+          <Grid.Col span={4}>
+            <Text size="sm" c="dimmed">
+              Source
+            </Text>
+          </Grid.Col>
+          <Grid.Col span={8}>
+            <Code>{appConfig.configPath}</Code>
+          </Grid.Col>
+          <Grid.Col span={4}>
+            <Text size="sm" c="dimmed">
+              S3 bucket support
+            </Text>
+          </Grid.Col>
+          <Grid.Col span={8}>
+            <Badge variant="light" color={appConfig.config.s3AdminEnabled ? 'teal' : 'gray'}>
+              {appConfig.config.s3AdminEnabled ? 'Enabled' : 'Disabled'}
+            </Badge>
+          </Grid.Col>
+        </Grid>
+        {appConfig.error ? (
+          <Text size="sm" mt={4}>
+            {appConfig.error}
+          </Text>
+        ) : null}
+      </Alert>
     </Stack>
   )
 }

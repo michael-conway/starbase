@@ -4,7 +4,6 @@ import {
 } from 'react'
 import { Navigate } from 'react-router-dom'
 import {
-  Alert,
   Badge,
   Button,
   Card,
@@ -100,12 +99,6 @@ export function LoginPage() {
                   value={baseUrl}
                   onChange={(event) => setBaseUrl(event.currentTarget.value)}
                 />
-
-                {appConfig.error ? (
-                  <Alert color="yellow" variant="light" title="Config load warning">
-                    {appConfig.error}
-                  </Alert>
-                ) : null}
 
                 {mode === 'basic' ? (
                   <Stack gap="md">

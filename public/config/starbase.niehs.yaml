@@ -1,0 +1,11 @@
+Title: NIEHS Data Commons
+Subtitle: Data Commons Explorer
+S3AdminEnabled: true
+
+
+AuthMode:
+  - Mode: native
+    AuthName: irods auth
+  - Mode: pam
+    AuthName: NIH Authentication
+
