@@ -953,6 +953,33 @@ export function ExplorerPage() {
   const canHandleDragFiles = (event: React.DragEvent) =>
     Array.from(event.dataTransfer.types).includes('Files')
 
+  const includesDroppedDirectory = (dataTransfer: DataTransfer) =>
+    Array.from(dataTransfer.items).some((item) => {
+      const entry = item.webkitGetAsEntry()
+      return Boolean(entry?.isDirectory)
+    })
+
+  const notifyDirectoryUploadRejected = () => {
+    notifications.show({
+      title: 'Folder upload is not supported',
+      message: 'Drop individual files instead of a collection.',
+      color: 'red',
+    })
+  }
+
+  const startDroppedUploadToPath = (
+    event: React.DragEvent,
+    targetPath: string,
+    targetLabel?: string,
+  ) => {
+    if (includesDroppedDirectory(event.dataTransfer)) {
+      notifyDirectoryUploadRejected()
+      return
+    }
+
+    startUploadToPath(Array.from(event.dataTransfer.files), targetPath, targetLabel)
+  }
+
   const startUploadToPath = (files: File[], targetPath: string, targetLabel?: string) => {
     if (files.length === 0) {
       return
@@ -1330,11 +1357,7 @@ export function ExplorerPage() {
 
           event.preventDefault()
           setDropTargetPath(null)
-          startUploadToPath(
-            Array.from(event.dataTransfer.files),
-            selectedPath,
-            displayName(selectedPath),
-          )
+          startDroppedUploadToPath(event, selectedPath, displayName(selectedPath))
         }}
       >
         <Stack gap="md">
@@ -1678,8 +1701,8 @@ export function ExplorerPage() {
                       event.preventDefault()
                       event.stopPropagation()
                       setDropTargetPath(null)
-                      startUploadToPath(
-                        Array.from(event.dataTransfer.files),
+                      startDroppedUploadToPath(
+                        event,
                         child.path,
                         child.path_segments.at(-1)?.display_name ?? displayName(child.path),
                       )
