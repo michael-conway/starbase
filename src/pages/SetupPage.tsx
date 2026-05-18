@@ -1,6 +1,10 @@
 import { Card, Code, Grid, List, Stack, Text, Title } from '@mantine/core'
+import { useAppConfig } from '../providers/use-app-config'
 
 export function SetupPage() {
+  const appConfig = useAppConfig()
+  const restApiBaseUrl = appConfig.config.restApiBaseUrl || 'same-origin API paths'
+
   return (
     <Stack gap="lg">
       <div>
@@ -17,7 +21,7 @@ export function SetupPage() {
               <Title order={3}>Server</Title>
               <List spacing="xs">
                 <List.Item>
-                  Start the API server on <Code>http://localhost:8080</Code>.
+                  Start the API server on <Code>{restApiBaseUrl}</Code>.
                 </List.Item>
                 <List.Item>
                   Run the app with <Code>npm run dev</Code>.
@@ -62,7 +66,7 @@ export function SetupPage() {
               <Title order={3}>Environment</Title>
               <List spacing="xs">
                 <List.Item>
-                  Default API URL: <Code>http://localhost:8080</Code>
+                  Default API URL: <Code>{restApiBaseUrl}</Code>
                 </List.Item>
                 <List.Item>
                   OIDC login path: <Code>/web/login</Code>

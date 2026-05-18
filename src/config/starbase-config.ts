@@ -6,13 +6,17 @@ export interface StarbaseAuthModeOption {
 export interface StarbaseConfig {
   title: string
   subtitle: string
+  restApiBaseUrl: string
   authModes: StarbaseAuthModeOption[]
   s3AdminEnabled: boolean
 }
 
+const buildTimeRestApiBaseUrl = normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL ?? '')
+
 export const defaultStarbaseConfig: StarbaseConfig = {
   title: 'Starbase',
   subtitle: 'iRODS Explorer',
+  restApiBaseUrl: buildTimeRestApiBaseUrl,
   authModes: [
     {
       mode: 'native',
@@ -36,6 +40,36 @@ function parseYamlScalar(value: string) {
   }
 
   return trimmed
+}
+
+function normalizeBaseUrl(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed || trimmed === '/') {
+    return ''
+  }
+
+  return trimmed.replace(/\/+$/, '')
+}
+
+function parseStringKey(lines: string[], key: string, fallback: string) {
+  const pattern = new RegExp(`^${key}\\s*:\\s*(.*)$`, 'i')
+
+  for (const rawLine of lines) {
+    const lineWithoutComment = rawLine.replace(/\s+#.*$/, '')
+    const trimmed = lineWithoutComment.trim()
+    if (!trimmed) {
+      continue
+    }
+
+    const match = trimmed.match(pattern)
+    if (!match) {
+      continue
+    }
+
+    return parseYamlScalar(match[1])
+  }
+
+  return fallback
 }
 
 function parseAuthModes(lines: string[]) {
@@ -196,6 +230,9 @@ export function parseStarbaseYamlConfig(yaml: string): StarbaseConfig {
   const lines = yaml.split(/\r?\n/)
   const title = parseTitle(lines)
   const subtitle = parseSubtitle(lines)
+  const restApiBaseUrl = normalizeBaseUrl(
+    parseStringKey(lines, 'RestAPIBaseURL', defaultStarbaseConfig.restApiBaseUrl),
+  )
   const authModes = parseAuthModes(lines)
   const s3AdminEnabled = parseBooleanKey(
     lines,
@@ -206,6 +243,7 @@ export function parseStarbaseYamlConfig(yaml: string): StarbaseConfig {
   return {
     title,
     subtitle,
+    restApiBaseUrl,
     authModes: authModes.length > 0 ? authModes : defaultStarbaseConfig.authModes,
     s3AdminEnabled,
   }

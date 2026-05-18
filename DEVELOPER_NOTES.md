@@ -211,7 +211,7 @@ Run the frontend integration test suite against a running backend:
 
 ```bash
 STARBASE_INTEGRATION=1 \
-STARBASE_TEST_BASE_URL=http://localhost:8080 \
+STARBASE_TEST_BASE_URL=http://127.0.0.1:8080 \
 STARBASE_TEST_BEARER_TOKEN='your bearer token' \
 STARBASE_TEST_IRODS_PATH='/tempZone/home/test1/file.txt' \
 STARBASE_TEST_COLLECTION_PATH='/tempZone/home/test1/project' \
@@ -225,19 +225,25 @@ Basic-auth integration is also supported through:
 
 ## Shared Local Stack
 
-The intended local integration environment is:
+The preferred local integration environment is:
 
-`../irods-go-rest/deployments/docker-test-framework/5-0`
+`../irods-grid-stack`
+
+The older `irods-go-drs` Docker Compose framework and the
+`../irods-go-rest/deployments/docker-test-framework/5-0` stack are deprecated
+for Starbase development.
 
 Typical flow:
 
 ```bash
-cd ../irods-go-rest/deployments/docker-test-framework/5-0
-docker compose build
-docker compose up
+cd ../irods-grid-stack
+cp .env.example .env
+docker compose --profile frontend config --quiet
+docker compose --profile frontend up -d --build
 ```
 
-Then run `irods-go-rest` and `starbase` separately against that shared stack.
+Then run this repository with Vite against the grid-stack provider REST endpoint
+at `http://127.0.0.1:8080`, or use the Starbase container exposed by the stack.
 
 ## Developer Links
 
@@ -252,5 +258,6 @@ Then run `irods-go-rest` and `starbase` separately against that shared stack.
 * [vite.config.ts](./vite.config.ts): dev proxy setup
 * [.env.example](./.env.example): frontend environment variables
 * [test/integration/irods-go-rest.integration.test.mjs](./test/integration/irods-go-rest.integration.test.mjs): env-gated integration checks
+* [../irods-grid-stack/README.md](../irods-grid-stack/README.md): preferred Compose development environment
 * [../irods-go-rest/README.md](../irods-go-rest/README.md): backend overview and auth model
 * [../irods-go-rest/DEVELOPER_NOTES.md](../irods-go-rest/DEVELOPER_NOTES.md): backend design philosophy and route guidance

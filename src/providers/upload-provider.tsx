@@ -237,7 +237,6 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       total: file.size,
     }))
 
-    setDockCollapsed(false)
     setUploads((current) => [...current, ...nextUploads])
 
     setPendingSelection(null)

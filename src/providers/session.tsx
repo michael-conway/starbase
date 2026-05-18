@@ -10,6 +10,7 @@ import {
   type SessionContextValue,
   type StoredPreferences,
 } from './session-context'
+import { useAppConfig } from './use-app-config'
 
 interface SessionSecretState {
   token: string
@@ -51,7 +52,9 @@ function readSessionStorage<T>(key: string, fallback: T): T {
 }
 
 export function SessionProvider({ children }: { children: ReactNode }) {
+  const appConfig = useAppConfig()
   const [preferences, setPreferences] = useState<StoredPreferences>(() => {
+    const configuredBaseUrl = appConfig.config.restApiBaseUrl.trim()
     const stored = readLocalStorage<StoredPreferences | Partial<StoredPreferences>>(
       preferencesStorageKey,
       defaultPreferences,
@@ -60,6 +63,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return {
       ...defaultPreferences,
       ...stored,
+      baseUrl:
+        typeof stored.baseUrl === 'string' && stored.baseUrl.trim()
+          ? stored.baseUrl.trim()
+          : configuredBaseUrl,
       basicAuthType:
         typeof stored.basicAuthType === 'string' && stored.basicAuthType.trim()
           ? stored.basicAuthType.trim()

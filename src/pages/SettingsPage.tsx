@@ -416,6 +416,14 @@ export function SettingsPage() {
           </Grid.Col>
           <Grid.Col span={4}>
             <Text size="sm" c="dimmed">
+              REST API
+            </Text>
+          </Grid.Col>
+          <Grid.Col span={8}>
+            <Code>{appConfig.config.restApiBaseUrl || 'Relative to Starbase origin'}</Code>
+          </Grid.Col>
+          <Grid.Col span={4}>
+            <Text size="sm" c="dimmed">
               S3 bucket support
             </Text>
           </Grid.Col>

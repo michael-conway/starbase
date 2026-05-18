@@ -62,5 +62,9 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
     [config, configPath, isLoading, error],
   )
 
-  return <AppConfigContext.Provider value={value}>{children}</AppConfigContext.Provider>
+  return (
+    <AppConfigContext.Provider value={value}>
+      {isLoading ? null : children}
+    </AppConfigContext.Provider>
+  )
 }
