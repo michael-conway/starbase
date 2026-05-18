@@ -1,5 +1,8 @@
+# Defaults for local development with ../irods-grid-stack.
+# The older irods-go-drs Docker Compose framework is deprecated for Starbase development.
 Title: Starbase
-Subtitle: iRODS Explorer
+Subtitle: iRODS Grid Stack
+RestAPIBaseURL: http://127.0.0.1:8080
 S3AdminEnabled: true
 
 AuthMode:

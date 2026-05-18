@@ -19,7 +19,7 @@ It includes:
 * resource listing and resource detail pages
 * queued upload management with progress and overwrite handling
 * runtime app branding and auth-mode configuration from YAML files in `public/config`
-* local development conventions matched to the `irods-go-rest` docker test framework
+* local development conventions matched to `irods-grid-stack`
 * Ubuntu-based Docker image build support and GitHub Actions verification
 
 ## Project Metadata
@@ -118,8 +118,9 @@ Then visit:
 * `http://localhost:5173/app/explorer`
 * `http://localhost:5173/setup`
 
-Leave the login page API base URL blank to use the Vite proxy, or provide an
-absolute backend URL when connecting to a published `irods-go-rest` service.
+The login page API base URL defaults from runtime config key
+`RestAPIBaseURL`. Leave it blank to use the Vite proxy, or provide an absolute
+backend URL when connecting to a published `irods-go-rest` service.
 
 ## Development Commands
 
@@ -175,12 +176,14 @@ For a container with a baked-in default backend API URL, set the Vite build arg:
 ```bash
 docker build \
   --tag starbase:local \
-  --build-arg VITE_API_BASE_URL=http://localhost:8080 \
+  --build-arg VITE_API_BASE_URL=http://127.0.0.1:8080 \
   .
 ```
 
 `VITE_API_BASE_URL` is embedded at build time by Vite. Users can still enter a
-different API base URL on the login page for their browser session.
+different API base URL on the login page for their browser session. Prefer
+runtime `RestAPIBaseURL` in `/config/starbase.yaml` for compose and published
+deployments because it can be changed without rebuilding the static bundle.
 
 ## Runtime Configuration
 
@@ -188,6 +191,15 @@ At browser startup, `starbase` loads YAML configuration from:
 
 ```text
 /config/starbase.yaml
+```
+
+Example:
+
+```yaml
+Title: Starbase
+Subtitle: iRODS Grid Stack
+RestAPIBaseURL: http://127.0.0.1:8080
+S3AdminEnabled: true
 ```
 
 Set `VITE_STARBASE_CONFIG_PATH=<path>` at build time to load an explicit config file:
@@ -210,6 +222,8 @@ Supported config keys:
 
 * `Title`: app title shown in the authenticated shell
 * `Subtitle`: app subtitle shown in the authenticated shell
+* `RestAPIBaseURL`: default browser-facing `irods-go-rest` endpoint used at
+  startup and on the login form; blank keeps same-origin relative API calls
 * `AuthMode`: basic auth mode options shown on the login form
 * `S3AdminEnabled`: enables S3 administration tools backed by
   `irods-go-rest` `/api/v1/ext/s3/*` routes, including collection bucket
@@ -217,6 +231,10 @@ Supported config keys:
 
 See [public/config/README.md](./public/config/README.md) for the file-level
 runtime config notes.
+
+`RestAPIBaseURL` is evaluated in the browser. In Docker Compose deployments it
+should usually be the host-facing REST URL, not the Docker-internal service
+name.
 
 ## Auth Model
 
@@ -280,7 +298,7 @@ Integration tests are env-gated and expect a running `irods-go-rest` service:
 
 ```bash
 STARBASE_INTEGRATION=1 \
-STARBASE_TEST_BASE_URL=http://localhost:8080 \
+STARBASE_TEST_BASE_URL=http://127.0.0.1:8080 \
 STARBASE_TEST_BASIC_USERNAME=rods \
 STARBASE_TEST_BASIC_PASSWORD=rods \
 STARBASE_TEST_IRODS_PATH=/tempZone/home/rods \
@@ -305,31 +323,43 @@ or `main`.
 
 ## Integration Environment
 
-The canonical local integration environment lives under:
+The preferred local development and integration environment is:
 
-`../irods-go-rest/deployments/docker-test-framework/5-0`
+`../irods-grid-stack`
 
-That compose stack starts PostgreSQL, an iRODS provider, and Keycloak for
-end-to-end development and OIDC testing.
+The older `irods-go-drs` Docker Compose framework and the
+`../irods-go-rest/deployments/docker-test-framework/5-0` stack previously used
+for Starbase development are deprecated. Use `irods-grid-stack` for new local
+development, integration testing, and OIDC/S3/DRS scenarios.
+
+With the `frontend` profile, `irods-grid-stack` starts PostgreSQL, Keycloak,
+the iRODS provider and resource servers, provider/resource `irods-go-rest`,
+`irods-go-drs`, S3 endpoints, and a published Starbase container. You can still
+run this repository with Vite on port `5173` against the same provider REST
+endpoint.
 
 Typical workflow:
 
 ```bash
-cd ../irods-go-rest/deployments/docker-test-framework/5-0
-docker compose build
-docker compose up
+cd ../irods-grid-stack
+cp .env.example .env
+docker compose --profile frontend config --quiet
+docker compose --profile frontend up -d --build
 ```
 
-Then run `irods-go-rest` on `http://localhost:8080` and keep `starbase` on the
-default Vite proxy, or set `VITE_PROXY_TARGET` / `VITE_API_BASE_URL` if the
-backend is published elsewhere.
+Use the provider REST endpoint at `http://127.0.0.1:8080` for
+`RestAPIBaseURL`, `VITE_PROXY_TARGET`, or `STARBASE_TEST_BASE_URL`. If the
+backend is published elsewhere, set `VITE_PROXY_TARGET`, `VITE_API_BASE_URL`,
+or runtime `RestAPIBaseURL` to that browser-facing URL.
 
 ## Environment
 
 Supported frontend environment variables:
 
-* `VITE_PROXY_TARGET`: dev server proxy target, defaulting to `http://localhost:8080`
-* `VITE_API_BASE_URL`: production bundle default API base URL
+* `VITE_PROXY_TARGET`: dev server proxy target, defaulting to `http://localhost:8080`;
+  use `http://127.0.0.1:8080` to match the `irods-grid-stack` defaults
+* `VITE_API_BASE_URL`: production bundle default API base URL used when
+  runtime config does not set `RestAPIBaseURL`
 * `VITE_STARBASE_CONFIG_PATH`: runtime config path override (for example `/config/starbase.niehs.yaml`)
 
 Supported integration test environment variables:
@@ -349,4 +379,5 @@ Supported integration test environment variables:
 * Mantine: https://mantine.dev/
 * TanStack Query: https://tanstack.com/query/latest
 * React Router: https://reactrouter.com/home
+* iRODS Grid Stack: ../irods-grid-stack/README.md
 * iRODS Go REST: ../irods-go-rest/README.md
