@@ -1500,43 +1500,43 @@ function SearchResultsPage({
 
 function MatchedAVUTable({ absolutePath, avus }: { absolutePath: string; avus: AVUEntry[] }) {
   return (
-    <Table verticalSpacing="xs">
-      <Table.Thead>
-        <Table.Tr>
-          <Table.Th>Attribute</Table.Th>
-          <Table.Th>Value</Table.Th>
-          <Table.Th>Unit</Table.Th>
-        </Table.Tr>
-      </Table.Thead>
-      <Table.Tbody>
-        <Table.Tr>
-          <Table.Td>
-            <Code>Absolute path</Code>
-          </Table.Td>
-          <Table.Td>
-            <Code className="details-inline-code">{absolutePath}</Code>
-          </Table.Td>
-          <Table.Td>—</Table.Td>
-        </Table.Tr>
-        {avus.map((avu, index) => (
-          <Table.Tr key={`${avu.attrib}-${avu.value}-${avu.unit ?? ''}-${index}`}>
-            <Table.Td>
-              <Code>{avu.attrib}</Code>
-            </Table.Td>
-            <Table.Td>{avu.value}</Table.Td>
-            <Table.Td>{avu.unit || '—'}</Table.Td>
-          </Table.Tr>
-        ))}
-        {!avus.length ? (
+    <Stack gap="xs">
+      <Stack gap={4}>
+        <Text size="xs" fw={600} c="dimmed">
+          Absolute path
+        </Text>
+        <Code className="details-inline-code">{absolutePath}</Code>
+      </Stack>
+
+      <Table verticalSpacing="xs">
+        <Table.Thead>
           <Table.Tr>
-            <Table.Td colSpan={3}>
-              <Text size="sm" c="dimmed">
-                No matched AVUs returned.
-              </Text>
-            </Table.Td>
+            <Table.Th>Attribute</Table.Th>
+            <Table.Th>Value</Table.Th>
+            <Table.Th>Unit</Table.Th>
           </Table.Tr>
-        ) : null}
-      </Table.Tbody>
-    </Table>
+        </Table.Thead>
+        <Table.Tbody>
+          {avus.map((avu, index) => (
+            <Table.Tr key={`${avu.attrib}-${avu.value}-${avu.unit ?? ''}-${index}`}>
+              <Table.Td>
+                <Code>{avu.attrib}</Code>
+              </Table.Td>
+              <Table.Td>{avu.value}</Table.Td>
+              <Table.Td>{avu.unit || '—'}</Table.Td>
+            </Table.Tr>
+          ))}
+          {!avus.length ? (
+            <Table.Tr>
+              <Table.Td colSpan={3}>
+                <Text size="sm" c="dimmed">
+                  No matched AVUs returned.
+                </Text>
+              </Table.Td>
+            </Table.Tr>
+          ) : null}
+        </Table.Tbody>
+      </Table>
+    </Stack>
   )
 }
