@@ -52,6 +52,7 @@ import {
   getFavorites,
   getPath,
   getPathChildren,
+  getSavedMetadataQueries,
   relocatePath,
   relocatePathByAction,
   renamePath,
@@ -60,6 +61,7 @@ import {
   type ActionLink,
   type FavoriteEntry,
   type PathEntry,
+  type SavedMetadataQuerySummary,
 } from '../lib/irods-rest'
 import { useSession } from '../providers/use-session'
 import { useUploadManager } from '../providers/upload-context'
@@ -233,6 +235,10 @@ function listingErrorDetails(error: Error) {
   }
 }
 
+function savedSearchDisplayName(search: SavedMetadataQuerySummary) {
+  return search.name.trim() || 'New Query'
+}
+
 export function ExplorerPage() {
   const { basicUsername, connection } = useSession()
   const navigate = useNavigate()
@@ -392,6 +398,11 @@ export function ExplorerPage() {
   const favoritesQuery = useQuery({
     queryKey: ['favorites', connection],
     queryFn: () => getFavorites(connection.auth, connection.baseUrl),
+  })
+  const savedSearchesQuery = useQuery({
+    queryKey: ['saved-metadata-queries', connection],
+    queryFn: () => getSavedMetadataQueries(connection.auth, connection.baseUrl),
+    staleTime: 60_000,
   })
 
   const childrenQueryOptions = searchActive
@@ -756,6 +767,7 @@ export function ExplorerPage() {
   const breadcrumbs = childrenResponse?.path_segments ?? entry?.path_segments ?? []
   const locationOptions = quickLocations(selectedPath, basicUsername)
   const favorites = favoritesQuery.data?.favorites ?? []
+  const savedSearches = savedSearchesQuery.data?.metadata_queries ?? []
   const listingError = childrenQuery.isError ? listingErrorDetails(childrenQuery.error) : null
   const allChildrenSelected = children.length > 0 && selectedChildren.length === children.length
   const someChildrenSelected =
@@ -1327,6 +1339,47 @@ export function ExplorerPage() {
               </Text>
             ) : null}
           </Stack>
+
+          <Divider />
+
+          <div>
+            <Text size="xs" tt="uppercase" fw={700} c="dimmed">
+              Saved Searches
+            </Text>
+          </div>
+
+          {savedSearchesQuery.isLoading ? (
+            <Text size="sm" c="dimmed">
+              Loading saved searches...
+            </Text>
+          ) : null}
+
+          {savedSearchesQuery.isError ? (
+            <Alert color="red" variant="light" title="Unable to load saved searches">
+              {savedSearchesQuery.error.message}
+            </Alert>
+          ) : null}
+
+          <Stack gap="xs">
+            {savedSearches.map((search) => (
+              <Button
+                key={search.id}
+                justify="flex-start"
+                variant="subtle"
+                leftSection={<IconSearch size={16} />}
+                onClick={() => navigate(`/app/search/results/${encodeURIComponent(search.id)}`)}
+                className="explorer-favorite-button"
+              >
+                {savedSearchDisplayName(search)}
+              </Button>
+            ))}
+
+            {!savedSearches.length && !savedSearchesQuery.isLoading && !savedSearchesQuery.isError ? (
+              <Text size="sm" c="dimmed">
+                No saved searches.
+              </Text>
+            ) : null}
+          </Stack>
         </Stack>
       </Card>
 
@@ -1577,6 +1630,19 @@ export function ExplorerPage() {
               loading={refreshMutation.isPending}
             >
               Refresh
+            </Button>
+            <Button
+              leftSection={<IconSearch size={16} />}
+              variant="light"
+              onClick={() => {
+                const params = new URLSearchParams({
+                  scope_root: selectedPath,
+                })
+                navigate(`/app/search/queries/new?${params.toString()}`)
+              }}
+              disabled={entry?.kind !== 'collection'}
+            >
+              Search from here
             </Button>
             <Button
               leftSection={<IconDots size={16} />}

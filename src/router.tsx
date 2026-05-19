@@ -69,6 +69,22 @@ export const router = createBrowserRouter([
             element: <ResourceDetailsPage />,
           },
           {
+            path: 'search/queries',
+            element: lazyElement(() => import('./pages/SearchPage'), 'SearchPage'),
+          },
+          {
+            path: 'search/queries/new',
+            element: lazyElement(() => import('./pages/SearchPage'), 'SearchPage'),
+          },
+          {
+            path: 'search/queries/:queryId/edit',
+            element: lazyElement(() => import('./pages/SearchPage'), 'SearchPage'),
+          },
+          {
+            path: 'search/results/:queryId',
+            element: lazyElement(() => import('./pages/SearchPage'), 'SearchPage'),
+          },
+          {
             path: 'settings',
             element: <SettingsPage />,
           },

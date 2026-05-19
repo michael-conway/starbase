@@ -72,8 +72,19 @@ body {
 
 .explorer-sidebar,
 .explorer-main,
-.explorer-details {
+.explorer-details,
+.search-main {
   min-width: 0;
+}
+
+.search-scope-input {
+  flex: 1;
+  min-width: 280px;
+}
+
+.search-json-editor textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
+    monospace;
 }
 
 .explorer-main-wide {
