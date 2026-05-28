@@ -4,6 +4,7 @@ import {
 } from 'react'
 import { Navigate } from 'react-router-dom'
 import {
+  Alert,
   Badge,
   Button,
   Card,
@@ -23,6 +24,13 @@ import {
   IconLock,
 } from '@tabler/icons-react'
 import type { AuthMode } from '../lib/irods-rest'
+import {
+  hasDirectOidcPkceConfig,
+  resolveOidcEndpointUrl,
+  resolveOidcPkceRedirectUri,
+  resolveOidcPkceUrl,
+} from '../config/starbase-config'
+import { startOidcPkceSignIn } from '../features/oidc-pkce'
 import { useAppConfig } from '../providers/use-app-config'
 import { useSession } from '../providers/use-session'
 
@@ -41,6 +49,14 @@ export function LoginPage() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [token, setToken] = useState('')
+  const [oidcError, setOidcError] = useState<string | null>(null)
+  const oidcEndpointUrl = resolveOidcEndpointUrl(baseUrl, appConfig.config.oidcEndpoint)
+  const directPkceEnabled = hasDirectOidcPkceConfig(appConfig.config)
+  const oidcAuthorizationUrl = resolveOidcPkceUrl(appConfig.config.oidcAuthorizationEndpoint)
+  const oidcRedirectUri = resolveOidcPkceRedirectUri(appConfig.config.oidcRedirectPath)
+  const oidcTokenEndpoint = resolveOidcPkceUrl(appConfig.config.oidcTokenEndpoint)
+  const oidcClientId = appConfig.config.oidcClientId.trim()
+  const oidcScope = appConfig.config.oidcScope
   const basicAuthOptions = useMemo(
     () =>
       appConfig.config.authModes.map((option) => ({
@@ -56,6 +72,34 @@ export function LoginPage() {
 
   if (isAuthenticated) {
     return <Navigate to="/app/explorer" replace />
+  }
+
+  const beginOidcSignIn = async () => {
+    setOidcError(null)
+
+    if (
+      directPkceEnabled &&
+      oidcAuthorizationUrl &&
+      oidcTokenEndpoint &&
+      oidcClientId &&
+      oidcRedirectUri
+    ) {
+      try {
+        const authorizationUrl = await startOidcPkceSignIn({
+          authorizationEndpoint: oidcAuthorizationUrl,
+          clientId: oidcClientId,
+          scope: oidcScope,
+          redirectUri: oidcRedirectUri,
+          baseUrl,
+        })
+        window.location.assign(authorizationUrl)
+      } catch (error) {
+        setOidcError(error instanceof Error ? error.message : 'Unable to start OIDC sign-in.')
+      }
+      return
+    }
+
+    window.open(oidcEndpointUrl, '_blank', 'noopener,noreferrer')
   }
 
   return (
@@ -141,12 +185,17 @@ export function LoginPage() {
                   </Stack>
                 ) : (
                   <Stack gap="md">
+                    {oidcError ? (
+                      <Alert color="red" variant="light" title="OIDC sign-in failed">
+                        {oidcError}
+                      </Alert>
+                    ) : null}
                     <Group>
                       <Button
-                        component="a"
-                        href={`${baseUrl.trim() || ''}/web/login`}
-                        target="_blank"
                         leftSection={<IconKey size={16} />}
+                        onClick={() => {
+                          void beginOidcSignIn()
+                        }}
                       >
                         Open sign-in
                       </Button>

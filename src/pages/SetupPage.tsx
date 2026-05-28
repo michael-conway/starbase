@@ -1,9 +1,21 @@
 import { Card, Code, Grid, List, Stack, Text, Title } from '@mantine/core'
+import {
+  hasDirectOidcPkceConfig,
+  resolveOidcEndpointUrl,
+  resolveOidcPkceRedirectUri,
+  resolveOidcPkceUrl,
+} from '../config/starbase-config'
 import { useAppConfig } from '../providers/use-app-config'
 
 export function SetupPage() {
   const appConfig = useAppConfig()
   const restApiBaseUrl = appConfig.config.restApiBaseUrl || 'same-origin API paths'
+  const oidcEndpoint = appConfig.config.oidcEndpoint
+  const oidcLoginUrl = resolveOidcEndpointUrl(appConfig.config.restApiBaseUrl, oidcEndpoint)
+  const directPkceEnabled = hasDirectOidcPkceConfig(appConfig.config)
+  const oidcAuthorizationEndpoint = resolveOidcPkceUrl(appConfig.config.oidcAuthorizationEndpoint)
+  const oidcTokenEndpoint = resolveOidcPkceUrl(appConfig.config.oidcTokenEndpoint)
+  const oidcRedirectUri = resolveOidcPkceRedirectUri(appConfig.config.oidcRedirectPath)
 
   return (
     <Stack gap="lg">
@@ -40,9 +52,23 @@ export function SetupPage() {
               <Title order={3}>Sign in</Title>
               <List spacing="xs">
                 <List.Item>Basic auth is available in the app.</List.Item>
-                <List.Item>
-                  OIDC sign-in uses <Code>/web/login</Code>.
-                </List.Item>
+                {directPkceEnabled ? (
+                  <>
+                    <List.Item>
+                      OIDC authorization endpoint: <Code>{oidcAuthorizationEndpoint}</Code>
+                    </List.Item>
+                    <List.Item>
+                      OIDC token endpoint: <Code>{oidcTokenEndpoint}</Code>
+                    </List.Item>
+                    <List.Item>
+                      OIDC callback URL: <Code>{oidcRedirectUri}</Code>
+                    </List.Item>
+                  </>
+                ) : (
+                  <List.Item>
+                    OIDC sign-in uses <Code>{oidcLoginUrl}</Code>.
+                  </List.Item>
+                )}
               </List>
             </Stack>
           </Card>
@@ -69,8 +95,13 @@ export function SetupPage() {
                   Default API URL: <Code>{restApiBaseUrl}</Code>
                 </List.Item>
                 <List.Item>
-                  OIDC login path: <Code>/web/login</Code>
+                  OIDC endpoint: <Code>{oidcEndpoint}</Code>
                 </List.Item>
+                {directPkceEnabled ? (
+                  <List.Item>
+                    OIDC client ID: <Code>{appConfig.config.oidcClientId || '—'}</Code>
+                  </List.Item>
+                ) : null}
               </List>
             </Stack>
           </Card>

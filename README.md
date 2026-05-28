@@ -198,7 +198,13 @@ Example:
 ```yaml
 Title: Starbase
 Subtitle: iRODS Grid Stack
-RestAPIBaseURL: http://127.0.0.1:8080
+RestAPIBaseURL: http://localhost:8080
+OIDCEndpoint: /web/login
+OIDCAuthorizationEndpoint: https://localhost:8443/realms/drs/protocol/openid-connect/auth
+OIDCTokenEndpoint: https://localhost:8443/realms/drs/protocol/openid-connect/token
+OIDCClientID: starbase-spa
+OIDCScope: openid profile email
+OIDCRedirectPath: /auth/callback
 S3AdminEnabled: true
 ```
 
@@ -224,6 +230,13 @@ Supported config keys:
 * `Subtitle`: app subtitle shown in the authenticated shell
 * `RestAPIBaseURL`: default browser-facing `irods-go-rest` endpoint used at
   startup and on the login form; blank keeps same-origin relative API calls
+* `OIDCEndpoint`: legacy backend `/web/login` entrypoint for OIDC flow fallback
+* `OIDCAuthorizationEndpoint`: direct browser PKCE authorization endpoint
+* `OIDCTokenEndpoint`: direct browser PKCE token endpoint
+* `OIDCClientID`: direct browser PKCE public client ID
+* `OIDCScope`: OIDC scopes requested in direct browser PKCE flow
+* `OIDCRedirectPath`: callback route path used by direct browser PKCE flow
+  (handled under `/auth/*`)
 * `AuthMode`: basic auth mode options shown on the login form
 * `S3AdminEnabled`: enables S3 administration tools backed by
   `irods-go-rest` `/api/v1/ext/s3/*` routes, including collection bucket
@@ -246,8 +259,15 @@ The frontend supports two session modes:
 Basic credentials are stored in browser session storage for the current tab and
 sent as `Authorization: Basic <base64(user:password)>`.
 
-OIDC currently launches the backend browser flow under `/web/login` and accepts
-a pasted access token for bearer-authenticated API requests.
+OIDC supports:
+
+* direct browser PKCE flow (`starbase -> keycloak -> /auth/callback`)
+* legacy backend web-login fallback under `/web/login`
+* manual pasted access token for bearer-authenticated API requests
+
+If `OIDCAuthorizationEndpoint`, `OIDCTokenEndpoint`, and `OIDCClientID` are all
+configured in `starbase.yaml`, Starbase uses direct PKCE flow; otherwise it
+falls back to `OIDCEndpoint`.
 
 Session preferences such as preferred auth mode, basic auth type, and API base
 URL are stored in local storage. Session secrets are stored in session storage

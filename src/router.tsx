@@ -5,6 +5,7 @@ import { primarySections } from './app-sections'
 import { ExplorerDetailsPage } from './pages/ExplorerDetailsPage'
 import { ExplorerPreviewPage } from './pages/ExplorerPreviewPage'
 import { LoginPage } from './pages/LoginPage'
+import { OidcCallbackPage } from './pages/OidcCallbackPage'
 import { ResourceDetailsPage } from './pages/ResourceDetailsPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { SetupPage } from './pages/SetupPage'
@@ -36,6 +37,10 @@ export const router = createBrowserRouter([
   {
     path: '/login',
     element: <LoginPage />,
+  },
+  {
+    path: '/auth/*',
+    element: <OidcCallbackPage />,
   },
   {
     path: '/setup',

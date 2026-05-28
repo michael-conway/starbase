@@ -1,0 +1,34 @@
+# Defaults for:
+#   - irods-grid-stack running WITHOUT frontend profile (Keycloak only on host)
+#   - host-run irods-go-rest (outside irods-grid-stack)
+#   - host-run Starbase in Vite dev mode (http://localhost:5173)
+#
+# Expected local setup:
+#   - host-run irods-go-rest on http://localhost:8080
+#   - irods-grid-stack keycloak on https://localhost:8443
+#   - Keycloak public client:
+#       client_id=starbase-spa
+#       redirect_uri=http://localhost:5173/auth/callback
+#       web_origin=http://localhost:5173
+#       audience mapper adds irods-go-rest audience in access token
+Title: Starbase
+Subtitle: Local Dev + Grid Keycloak
+RestAPIBaseURL: http://localhost:8080
+
+# Legacy backend /web/login flow fallback used when direct PKCE keys are absent.
+OIDCEndpoint: /web/login
+
+# Direct browser PKCE sign-in (starbase -> keycloak -> starbase callback).
+OIDCAuthorizationEndpoint: https://localhost:8443/realms/drs/protocol/openid-connect/auth
+OIDCTokenEndpoint: https://localhost:8443/realms/drs/protocol/openid-connect/token
+OIDCClientID: starbase-spa
+OIDCScope: openid profile email
+OIDCRedirectPath: /auth/callback
+
+S3AdminEnabled: true
+
+AuthMode:
+  - Mode: native
+    AuthName: irods auth
+  - Mode: pam
+    AuthName: pam auth
