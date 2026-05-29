@@ -10,6 +10,13 @@ import { clearOidcPkceSignInTransaction, completeOidcPkceSignIn } from '../featu
 import { useAppConfig } from '../providers/use-app-config'
 import { useSession } from '../providers/use-session'
 
+interface OidcExchangeResult {
+  accessToken: string
+  baseUrl: string
+}
+
+const inFlightOidcExchanges = new Map<string, Promise<OidcExchangeResult>>()
+
 function validatePkceConfig(config: StarbaseConfig) {
   const authorizationEndpoint = resolveOidcPkceUrl(config.oidcAuthorizationEndpoint)
   const tokenEndpoint = resolveOidcPkceUrl(config.oidcTokenEndpoint)
@@ -47,6 +54,7 @@ export function OidcCallbackPage() {
       const oauthErrorDescription = params.get('error_description')?.trim()
       const code = params.get('code')?.trim()
       const state = params.get('state')?.trim()
+      const exchangeKey = code && state ? `${state}:${code}` : ''
 
       if (oauthError) {
         if (!cancelled) {
@@ -76,13 +84,21 @@ export function OidcCallbackPage() {
       }
 
       try {
-        const result = await completeOidcPkceSignIn({
-          tokenEndpoint: pkceConfig.tokenEndpoint,
-          clientId: pkceConfig.clientId,
-          redirectUri: pkceConfig.redirectUri,
-          code,
-          state,
-        })
+        let exchange = inFlightOidcExchanges.get(exchangeKey)
+        if (!exchange) {
+          exchange = completeOidcPkceSignIn({
+            tokenEndpoint: pkceConfig.tokenEndpoint,
+            clientId: pkceConfig.clientId,
+            redirectUri: pkceConfig.redirectUri,
+            code,
+            state,
+          }).finally(() => {
+            inFlightOidcExchanges.delete(exchangeKey)
+          })
+          inFlightOidcExchanges.set(exchangeKey, exchange)
+        }
+
+        const result = await exchange
 
         if (!cancelled) {
           signInOidc({
