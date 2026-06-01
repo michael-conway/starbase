@@ -283,13 +283,6 @@ export function SettingsPage() {
         </Group>
       </Card>
 
-      <Card shadow="sm" radius="xl" padding="lg">
-        <Stack gap="md">
-          <Title order={3}>Connection</Title>
-          <TextInput label="REST API Base URL" value={resolvedRestApiBaseUrl} readOnly />
-        </Stack>
-      </Card>
-
       {s3AdminEnabled ? (
         <Card shadow="sm" radius="xl" padding="lg">
           <Stack gap="md">

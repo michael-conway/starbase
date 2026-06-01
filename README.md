@@ -263,7 +263,6 @@ OIDC supports:
 
 * direct browser PKCE flow (`starbase -> keycloak -> /auth/callback`)
 * legacy backend web-login fallback under `/web/login`
-* manual pasted access token for bearer-authenticated API requests
 
 If `OIDCAuthorizationEndpoint`, `OIDCTokenEndpoint`, and `OIDCClientID` are all
 configured in `starbase.yaml`, Starbase uses direct PKCE flow; otherwise it

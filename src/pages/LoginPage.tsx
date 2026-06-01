@@ -40,7 +40,6 @@ export function LoginPage() {
     isAuthenticated,
     preferences,
     signInBasic,
-    signInOidc,
     setPreferredAuthMode,
   } = useSession()
   const [mode, setMode] = useState<AuthMode>(preferences.authMode)
@@ -48,7 +47,6 @@ export function LoginPage() {
   const [basicAuthType, setBasicAuthType] = useState(preferences.basicAuthType)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  const [token, setToken] = useState('')
   const [oidcError, setOidcError] = useState<string | null>(null)
   const oidcEndpointUrl = resolveOidcEndpointUrl(baseUrl, appConfig.config.oidcEndpoint)
   const directPkceEnabled = hasDirectOidcPkceConfig(appConfig.config)
@@ -190,28 +188,9 @@ export function LoginPage() {
                           void beginOidcSignIn()
                         }}
                       >
-                        Open sign-in
+                        Login
                       </Button>
                     </Group>
-
-                    <PasswordInput
-                      label="Access token"
-                      placeholder="Paste access token"
-                      value={token}
-                      onChange={(event) => setToken(event.currentTarget.value)}
-                    />
-
-                    <Button
-                      variant="filled"
-                      onClick={() =>
-                        signInOidc({
-                          token,
-                          baseUrl,
-                        })
-                      }
-                    >
-                      Enter workspace
-                    </Button>
                   </Stack>
                 )}
               </Stack>
