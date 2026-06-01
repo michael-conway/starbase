@@ -44,7 +44,7 @@ export function LoginPage() {
     setPreferredAuthMode,
   } = useSession()
   const [mode, setMode] = useState<AuthMode>(preferences.authMode)
-  const [baseUrl, setBaseUrl] = useState(preferences.baseUrl)
+  const baseUrl = preferences.baseUrl
   const [basicAuthType, setBasicAuthType] = useState(preferences.basicAuthType)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -135,13 +135,6 @@ export function LoginPage() {
                     { label: 'Basic auth', value: 'basic' },
                     { label: 'OIDC', value: 'oidc' },
                   ]}
-                />
-
-                <TextInput
-                  label="API base URL"
-                  placeholder="Use dev proxy when blank"
-                  value={baseUrl}
-                  onChange={(event) => setBaseUrl(event.currentTarget.value)}
                 />
 
                 {mode === 'basic' ? (

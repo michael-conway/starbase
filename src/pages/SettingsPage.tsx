@@ -82,6 +82,7 @@ function s3SecretError(error: Error) {
 export function SettingsPage() {
   const appConfig = useAppConfig()
   const { basicUsername, connection, oidcToken } = useSession()
+  const resolvedRestApiBaseUrl = connection.baseUrl.trim() || 'Relative to Starbase origin'
   const s3AdminEnabled = appConfig.config.s3AdminEnabled
   const userName = useMemo(
     () =>
@@ -282,6 +283,13 @@ export function SettingsPage() {
         </Group>
       </Card>
 
+      <Card shadow="sm" radius="xl" padding="lg">
+        <Stack gap="md">
+          <Title order={3}>Connection</Title>
+          <TextInput label="REST API Base URL" value={resolvedRestApiBaseUrl} readOnly />
+        </Stack>
+      </Card>
+
       {s3AdminEnabled ? (
         <Card shadow="sm" radius="xl" padding="lg">
           <Stack gap="md">
@@ -420,7 +428,7 @@ export function SettingsPage() {
             </Text>
           </Grid.Col>
           <Grid.Col span={8}>
-            <Code>{appConfig.config.restApiBaseUrl || 'Relative to Starbase origin'}</Code>
+            <Code>{resolvedRestApiBaseUrl}</Code>
           </Grid.Col>
           <Grid.Col span={4}>
             <Text size="sm" c="dimmed">
