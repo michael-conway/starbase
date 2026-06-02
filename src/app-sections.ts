@@ -24,6 +24,13 @@ export const primarySections: AppSectionDefinition[] = [
     exportName: 'ExplorerPage',
   },
   {
+    slug: 'search',
+    label: 'Search',
+    icon: IconSearch,
+    importPage: () => import('./pages/SearchPage'),
+    exportName: 'SearchPage',
+  },
+  {
     slug: 'resources',
     label: 'Resources',
     icon: IconServer2,
@@ -35,13 +42,6 @@ export const primarySections: AppSectionDefinition[] = [
 // Keep future major sections declared close to the active explorer section so the
 // shell can expand without reorganizing unrelated files later.
 export const futureSections: AppSectionDefinition[] = [
-  {
-    slug: 'search',
-    label: 'Search',
-    icon: IconSearch,
-    importPage: () => import('./pages/SearchPage'),
-    exportName: 'SearchPage',
-  },
   {
     slug: 'rules',
     label: 'Rules',

@@ -33,6 +33,65 @@ const defaultSecrets: SessionSecretState = {
   password: '',
 }
 
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  const parts = token.split('.')
+  if (parts.length < 2) {
+    return null
+  }
+
+  const payloadSegment = parts[1]
+  const base64 = payloadSegment.replace(/-/g, '+').replace(/_/g, '/')
+  const padded = `${base64}${'='.repeat((4 - (base64.length % 4)) % 4)}`
+
+  try {
+    const decoded = window.atob(padded)
+    const parsed = JSON.parse(decoded) as unknown
+    if (!parsed || typeof parsed !== 'object') {
+      return null
+    }
+    return parsed as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+function oidcUsernameFromToken(token: string) {
+  const payload = decodeJwtPayload(token.trim())
+  if (!payload) {
+    return ''
+  }
+
+  const candidates = [
+    payload.preferred_username,
+    payload.username,
+    payload.upn,
+    payload.email,
+    payload.sub,
+  ]
+
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') {
+      continue
+    }
+
+    const trimmed = candidate.trim()
+    if (!trimmed) {
+      continue
+    }
+
+    if (trimmed.includes('@')) {
+      const localPart = trimmed.split('@')[0]?.trim()
+      if (localPart) {
+        return localPart
+      }
+    }
+
+    return trimmed
+  }
+
+  return ''
+}
+
 function readLocalStorage<T>(key: string, fallback: T): T {
   try {
     const raw = window.localStorage.getItem(key)
@@ -109,6 +168,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     preferences.authMode === 'basic'
       ? Boolean(secrets.username && secrets.password)
       : Boolean(secrets.token)
+  const oidcDerivedUsername = useMemo(
+    () => oidcUsernameFromToken(secrets.token),
+    [secrets.token],
+  )
+  const effectiveUsername =
+    preferences.authMode === 'oidc'
+      ? (secrets.username.trim() || oidcDerivedUsername)
+      : secrets.username
 
   const value = useMemo<SessionContextValue>(
     () => ({
@@ -116,7 +183,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       connection,
       preferences,
       oidcToken: secrets.token,
-      basicUsername: secrets.username,
+      basicUsername: effectiveUsername,
       signInBasic: ({ username, password, baseUrl, basicAuthType }) => {
         setPreferences({
           authMode: 'basic',
@@ -130,14 +197,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         })
       },
       signInOidc: ({ token, baseUrl }) => {
+        const normalizedToken = token.trim()
         setPreferences({
           authMode: 'oidc',
           baseUrl: baseUrl.trim(),
           basicAuthType: preferences.basicAuthType,
         })
         setSecrets({
-          token: token.trim(),
-          username: '',
+          token: normalizedToken,
+          username: oidcUsernameFromToken(normalizedToken),
           password: '',
         })
       },
@@ -157,7 +225,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         setSecrets(defaultSecrets)
       },
     }),
-    [connection, isAuthenticated, preferences, secrets],
+    [connection, effectiveUsername, isAuthenticated, preferences, secrets],
   )
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>

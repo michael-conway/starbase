@@ -27,8 +27,8 @@ It includes:
 | Field | Value |
 | --- | --- |
 | Project Name | `starbase` |
-| Current Version | `0.0.0` |
-| Status | `Active Development` |
+| Current Version | `1.0.0-alpha` |
+| Status | `Alpha` |
 | Primary Developer | `Mike Conway` |
 | Organization | `NIEHS` |
 | Repository | `https://github.com/michael-conway/starbase` |
@@ -91,12 +91,18 @@ workspace interactions, runtime configuration, and browser-oriented UI.
 | `/app/explorer` | Collection and data object browser |
 | `/app/explorer/details` | Data object or collection details |
 | `/app/explorer/preview` | Preview route for supported file types |
+| `/app/search` | Saved metadata query and search workspace |
+| `/app/search/queries` | Saved metadata query list |
+| `/app/search/queries/new` | New metadata query editor |
+| `/app/search/queries/:queryId/edit` | Saved metadata query editor |
+| `/app/search/results/:queryId` | Saved metadata query results |
 | `/app/resources` | iRODS resource listing |
 | `/app/resources/details` | Resource detail page |
+| `/app/settings` | Session settings and enabled user tools |
 | `/app/setup` | Setup page inside the authenticated shell |
 
-Search, rules, and admin pages are scaffolded in `src/pages/` and declared as
-future sections in `src/app-sections.ts`, but they are not part of the active
+Rules and admin pages are scaffolded in `src/pages/` and declared as future
+sections in `src/app-sections.ts`, but they are not part of the active
 navigation or route table yet.
 
 ## Quick Start
@@ -110,7 +116,7 @@ npm run dev
 
 By default, the Vite dev server proxies backend traffic to
 `http://localhost:8080`. The proxy covers `/api`, `/healthz`, `/openapi.yaml`,
-`/swagger`, and `/web`.
+and `/swagger`.
 
 Then visit:
 
@@ -118,9 +124,9 @@ Then visit:
 * `http://localhost:5173/app/explorer`
 * `http://localhost:5173/setup`
 
-The login page API base URL defaults from runtime config key
-`RestAPIBaseURL`. Leave it blank to use the Vite proxy, or provide an absolute
-backend URL when connecting to a published `irods-go-rest` service.
+The API base URL defaults from runtime config key `RestAPIBaseURL`. Leave it
+blank to use the Vite proxy, or provide an absolute backend URL when connecting
+to a published `irods-go-rest` service.
 
 ## Development Commands
 
@@ -180,9 +186,8 @@ docker build \
   .
 ```
 
-`VITE_API_BASE_URL` is embedded at build time by Vite. Users can still enter a
-different API base URL on the login page for their browser session. Prefer
-runtime `RestAPIBaseURL` in `/config/starbase.yaml` for compose and published
+`VITE_API_BASE_URL` is embedded at build time by Vite. Prefer runtime
+`RestAPIBaseURL` in `/config/starbase.yaml` for compose and published
 deployments because it can be changed without rebuilding the static bundle.
 
 ## Runtime Configuration
@@ -193,12 +198,22 @@ At browser startup, `starbase` loads YAML configuration from:
 /config/starbase.yaml
 ```
 
+For `1.0.0-alpha`, the bundled `public/config/starbase.yaml` intentionally
+targets the local `irods-grid-stack` provider REST and Keycloak services.
+Published deployments should provide their own browser-reachable
+`/config/starbase.yaml` with deployment-specific REST and OIDC endpoints.
+
 Example:
 
 ```yaml
 Title: Starbase
 Subtitle: iRODS Grid Stack
-RestAPIBaseURL: http://127.0.0.1:8080
+RestAPIBaseURL: http://localhost:8080
+OIDCAuthorizationEndpoint: https://localhost:8443/realms/drs/protocol/openid-connect/auth
+OIDCTokenEndpoint: https://localhost:8443/realms/drs/protocol/openid-connect/token
+OIDCClientID: starbase-spa
+OIDCScope: openid profile email
+OIDCRedirectPath: /auth/callback
 S3AdminEnabled: true
 ```
 
@@ -223,7 +238,13 @@ Supported config keys:
 * `Title`: app title shown in the authenticated shell
 * `Subtitle`: app subtitle shown in the authenticated shell
 * `RestAPIBaseURL`: default browser-facing `irods-go-rest` endpoint used at
-  startup and on the login form; blank keeps same-origin relative API calls
+  startup for API calls; blank keeps same-origin relative API calls
+* `OIDCAuthorizationEndpoint`: direct browser PKCE authorization endpoint
+* `OIDCTokenEndpoint`: direct browser PKCE token endpoint
+* `OIDCClientID`: direct browser PKCE public client ID
+* `OIDCScope`: OIDC scopes requested in direct browser PKCE flow
+* `OIDCRedirectPath`: callback route path used by direct browser PKCE flow
+  (handled under `/auth/*`)
 * `AuthMode`: basic auth mode options shown on the login form
 * `S3AdminEnabled`: enables S3 administration tools backed by
   `irods-go-rest` `/api/v1/ext/s3/*` routes, including collection bucket
@@ -246,12 +267,16 @@ The frontend supports two session modes:
 Basic credentials are stored in browser session storage for the current tab and
 sent as `Authorization: Basic <base64(user:password)>`.
 
-OIDC currently launches the backend browser flow under `/web/login` and accepts
-a pasted access token for bearer-authenticated API requests.
+OIDC supports:
 
-Session preferences such as preferred auth mode, basic auth type, and API base
-URL are stored in local storage. Session secrets are stored in session storage
-and are cleared by signing out or closing the browser tab.
+* direct browser PKCE flow (`starbase -> keycloak -> /auth/callback`)
+
+`OIDCAuthorizationEndpoint`, `OIDCTokenEndpoint`, and `OIDCClientID` are
+required in `starbase.yaml` for OIDC sign-in.
+
+Session preferences such as preferred auth mode, basic auth type, and resolved
+API base URL are stored in local storage. Session secrets are stored in session
+storage and are cleared by signing out or closing the browser tab.
 
 ## Explorer Model
 

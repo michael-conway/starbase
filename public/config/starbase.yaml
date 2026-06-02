@@ -1,8 +1,20 @@
-# Defaults for local development with ../irods-grid-stack.
-# The older irods-go-drs Docker Compose framework is deprecated for Starbase development.
+# Defaults for running against irods-grid-stack provider REST + Keycloak.
+# Direct Starbase PKCE sign-in requires a Keycloak public client:
+#   - Client ID: starbase-spa (or set OIDCClientID below to match)
+#   - Valid redirect URI: http://localhost:5173/auth/callback
+#   - Web origin: http://localhost:5173
+#   - Add audience mapper so access token includes irods-go-rest audience.
 Title: Starbase
 Subtitle: iRODS Grid Stack
-RestAPIBaseURL: http://127.0.0.1:8080
+RestAPIBaseURL: http://localhost:8080
+
+# Direct browser PKCE sign-in (starbase -> keycloak -> starbase callback).
+OIDCAuthorizationEndpoint: https://localhost:8443/realms/drs/protocol/openid-connect/auth
+OIDCTokenEndpoint: https://localhost:8443/realms/drs/protocol/openid-connect/token
+OIDCClientID: starbase-spa
+OIDCScope: openid profile email
+OIDCRedirectPath: /auth/callback
+
 S3AdminEnabled: true
 
 AuthMode:

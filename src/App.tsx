@@ -29,7 +29,7 @@ import {
 import { primarySections } from './app-sections'
 import { defaultPath } from './features/explorer'
 import { userFromOIDCToken } from './features/identity'
-import { getFavorites, getHealth, getServiceInfo } from './lib/irods-rest'
+import { getFavorites, getHealth, getSavedMetadataQueries, getServiceInfo } from './lib/irods-rest'
 import { useAppConfig } from './providers/use-app-config'
 import { useSession } from './providers/use-session'
 
@@ -89,6 +89,12 @@ function App() {
   useQuery({
     queryKey: ['favorites', connection],
     queryFn: () => getFavorites(connection.auth, connection.baseUrl),
+    enabled: isAuthenticated,
+    staleTime: 60_000,
+  })
+  useQuery({
+    queryKey: ['saved-metadata-queries', connection],
+    queryFn: () => getSavedMetadataQueries(connection.auth, connection.baseUrl),
     enabled: isAuthenticated,
     staleTime: 60_000,
   })

@@ -7,6 +7,11 @@ export interface StarbaseConfig {
   title: string
   subtitle: string
   restApiBaseUrl: string
+  oidcAuthorizationEndpoint: string
+  oidcTokenEndpoint: string
+  oidcClientId: string
+  oidcScope: string
+  oidcRedirectPath: string
   authModes: StarbaseAuthModeOption[]
   s3AdminEnabled: boolean
 }
@@ -17,6 +22,11 @@ export const defaultStarbaseConfig: StarbaseConfig = {
   title: 'Starbase',
   subtitle: 'iRODS Explorer',
   restApiBaseUrl: buildTimeRestApiBaseUrl,
+  oidcAuthorizationEndpoint: '',
+  oidcTokenEndpoint: '',
+  oidcClientId: '',
+  oidcScope: 'openid profile email',
+  oidcRedirectPath: '/auth/callback',
   authModes: [
     {
       mode: 'native',
@@ -49,6 +59,59 @@ function normalizeBaseUrl(value: string) {
   }
 
   return trimmed.replace(/\/+$/, '')
+}
+
+function normalizeOptionalOidcUrlOrPath(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return ''
+  }
+
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed
+  }
+
+  return trimmed.startsWith('/') ? trimmed : `/${trimmed}`
+}
+
+function normalizeOidcScope(value: string) {
+  const trimmed = value.trim()
+  return trimmed || defaultStarbaseConfig.oidcScope
+}
+
+function normalizeOidcRedirectPath(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return defaultStarbaseConfig.oidcRedirectPath
+  }
+
+  return trimmed.startsWith('/') ? trimmed : `/${trimmed}`
+}
+
+export function resolveOidcPkceUrl(pathOrUrl: string) {
+  const normalized = normalizeOptionalOidcUrlOrPath(pathOrUrl)
+  if (!normalized) {
+    return ''
+  }
+
+  if (/^https?:\/\//i.test(normalized)) {
+    return normalized
+  }
+
+  return `${window.location.origin}${normalized}`
+}
+
+export function resolveOidcPkceRedirectUri(redirectPath: string) {
+  const normalizedPath = normalizeOidcRedirectPath(redirectPath)
+  return `${window.location.origin}${normalizedPath}`
+}
+
+export function hasDirectOidcPkceConfig(config: StarbaseConfig) {
+  return Boolean(
+    config.oidcAuthorizationEndpoint.trim() &&
+      config.oidcTokenEndpoint.trim() &&
+      config.oidcClientId.trim(),
+  )
 }
 
 function parseStringKey(lines: string[], key: string, fallback: string) {
@@ -233,6 +296,24 @@ export function parseStarbaseYamlConfig(yaml: string): StarbaseConfig {
   const restApiBaseUrl = normalizeBaseUrl(
     parseStringKey(lines, 'RestAPIBaseURL', defaultStarbaseConfig.restApiBaseUrl),
   )
+  const oidcAuthorizationEndpoint = normalizeOptionalOidcUrlOrPath(
+    parseStringKey(
+      lines,
+      'OIDCAuthorizationEndpoint',
+      defaultStarbaseConfig.oidcAuthorizationEndpoint,
+    ),
+  )
+  const oidcTokenEndpoint = normalizeOptionalOidcUrlOrPath(
+    parseStringKey(lines, 'OIDCTokenEndpoint', defaultStarbaseConfig.oidcTokenEndpoint),
+  )
+  const oidcClientId = parseStringKey(lines, 'OIDCClientID', defaultStarbaseConfig.oidcClientId)
+    .trim()
+  const oidcScope = normalizeOidcScope(
+    parseStringKey(lines, 'OIDCScope', defaultStarbaseConfig.oidcScope),
+  )
+  const oidcRedirectPath = normalizeOidcRedirectPath(
+    parseStringKey(lines, 'OIDCRedirectPath', defaultStarbaseConfig.oidcRedirectPath),
+  )
   const authModes = parseAuthModes(lines)
   const s3AdminEnabled = parseBooleanKey(
     lines,
@@ -244,6 +325,11 @@ export function parseStarbaseYamlConfig(yaml: string): StarbaseConfig {
     title,
     subtitle,
     restApiBaseUrl,
+    oidcAuthorizationEndpoint,
+    oidcTokenEndpoint,
+    oidcClientId,
+    oidcScope,
+    oidcRedirectPath,
     authModes: authModes.length > 0 ? authModes : defaultStarbaseConfig.authModes,
     s3AdminEnabled,
   }

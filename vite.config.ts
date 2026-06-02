@@ -13,7 +13,6 @@ export default defineConfig(({ mode }) => {
         '/healthz': target,
         '/openapi.yaml': target,
         '/swagger': target,
-        '/web': target,
       },
     },
   }

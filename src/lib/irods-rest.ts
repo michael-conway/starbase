@@ -128,6 +128,115 @@ export interface PathChildrenResponse {
   }
 }
 
+export type EntryKind = 'data_object' | 'collection'
+export type EntryQueryScopeMode = 'self' | 'children' | 'descendants' | 'absolute'
+export type EntryConditionOperator = '=' | 'like'
+
+export interface EntryQueryScope {
+  root?: string
+  mode?: EntryQueryScopeMode
+  path_hintable?: boolean
+}
+
+export interface EntryQueryCondition {
+  field: string
+  op: EntryConditionOperator | string
+  value: string
+}
+
+export interface EntryQueryDefaults {
+  limit?: number
+  include_matched_avus?: boolean
+}
+
+export interface EntryQueryDefinition {
+  version?: string
+  type?: string
+  kinds?: EntryKind[]
+  scope?: EntryQueryScope
+  conditions?: EntryQueryCondition[]
+  defaults?: EntryQueryDefaults
+  replica_policy?: string
+  metadata?: Record<string, unknown>
+}
+
+export interface PathQueryPage {
+  limit?: number
+  has_more?: boolean
+  next_page_token?: string
+  returned?: {
+    collections: number
+    data_objects: number
+  }
+  scanned?: {
+    collections: number
+    data_objects: number
+  }
+  totals?: {
+    collections: number
+    data_objects: number
+  }
+}
+
+export interface PathQuerySummary {
+  search_scope?: EntryQueryScopeMode
+  scope?: EntryQueryScope
+  kinds?: EntryKind[]
+  conditions?: EntryQueryCondition[]
+  include_totals?: boolean
+  include_matched_avus?: boolean
+}
+
+export interface PathQueryResponse {
+  irods_path?: string
+  path_segments?: PathSegmentLink[]
+  paths: PathEntry[]
+  matched_avus?: Record<string, AVUEntry[]>
+  page: PathQueryPage
+  query: PathQuerySummary
+}
+
+export interface SavedMetadataQueryLinks {
+  self?: ActionLink
+  update?: ActionLink
+  delete?: ActionLink
+}
+
+export interface SavedMetadataQuery {
+  version?: string
+  id: string
+  name: string
+  description?: string
+  query: EntryQueryDefinition
+  created_at?: string
+  updated_at?: string
+  links?: SavedMetadataQueryLinks
+}
+
+export interface SavedMetadataQuerySummary {
+  id: string
+  name: string
+  description?: string
+  file_name?: string
+  irods_path?: string
+  created_at?: string
+  updated_at?: string
+  links?: SavedMetadataQueryLinks
+}
+
+export interface SavedMetadataQueryResponse {
+  metadata_query: SavedMetadataQuery
+}
+
+export interface SavedMetadataQueryCollectionResponse {
+  metadata_queries: SavedMetadataQuerySummary[]
+  count?: number
+  links?: {
+    self?: ActionLink
+    create?: ActionLink
+  }
+}
+
 export interface PathReplicasResponse {
   irods_path: string
   path_segments: PathSegmentLink[]
@@ -397,8 +506,10 @@ export interface PathContentsUploadResponse {
 }
 
 export interface ApiErrorPayload {
-  code: string
+  code?: string
+  error?: string
   message: string
+  fields?: Record<string, string>
 }
 
 export type AuthMode = 'basic' | 'oidc'
@@ -414,12 +525,14 @@ export interface RequestAuth {
 export class ApiError extends Error {
   status: number
   code?: string
+  fields?: Record<string, string>
 
-  constructor(status: number, message: string, code?: string) {
+  constructor(status: number, message: string, code?: string, fields?: Record<string, string>) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.code = code
+    this.fields = fields
   }
 }
 
@@ -513,8 +626,9 @@ function parseFilenameFromContentDisposition(value: string | null) {
 function buildApiError(status: number, payload?: ApiErrorPayload | null) {
   return new ApiError(
     status,
-    payload?.message ?? `Request failed with status ${status}`,
-    payload?.code,
+    payload?.message ?? 'Request failed. The server returned an unexpected response.',
+    payload?.code ?? payload?.error,
+    payload?.fields,
   )
 }
 
@@ -529,6 +643,7 @@ async function request<T>(
   },
 ): Promise<T> {
   const headers = {
+    Accept: 'application/json',
     ...buildHeaders(options?.auth),
     ...options?.headers,
   }
@@ -540,25 +655,19 @@ async function request<T>(
 
   if (!response.ok) {
     let payload: ApiErrorPayload | null = null
-    let fallbackMessage: string | undefined
 
     try {
       payload = (await response.json()) as ApiErrorPayload
     } catch {
-      try {
-        const text = (await response.text()).trim()
-        if (text) {
-          fallbackMessage = text
-        }
-      } catch {
-        // Fall back to the HTTP status when the response body is not JSON.
-      }
+      // Use a generic message when the server does not return JSON so HTML error
+      // pages are never reflected into the UI.
     }
 
     throw new ApiError(
       response.status,
-      payload?.message ?? fallbackMessage ?? `Request failed with status ${response.status}`,
-      payload?.code,
+      payload?.message ?? 'Request failed. The server returned an unexpected response.',
+      payload?.code ?? payload?.error,
+      payload?.fields,
     )
   }
 
@@ -650,6 +759,93 @@ export function getFavorites(auth: RequestAuth, baseUrl?: string) {
     auth,
     baseUrl,
   }).then((response) => validateFavoriteCollectionResponse(response))
+}
+
+export function getSavedMetadataQueries(auth: RequestAuth, baseUrl?: string) {
+  return request<SavedMetadataQueryCollectionResponse>('/api/v1/ext/metadata-queries', {
+    auth,
+    baseUrl,
+  })
+}
+
+export function getSavedMetadataQuery(queryId: string, auth: RequestAuth, baseUrl?: string) {
+  const normalizedQueryId = requireNonEmptyValue(queryId, 'query_id')
+
+  return request<SavedMetadataQueryResponse>(
+    `/api/v1/ext/metadata-queries/${encodeURIComponent(normalizedQueryId)}`,
+    {
+      auth,
+      baseUrl,
+    },
+  )
+}
+
+export function saveMetadataQuery(
+  payload: {
+    name?: string
+    description?: string
+    query: EntryQueryDefinition
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: {
+    queryId?: string
+  },
+) {
+  const queryId = options?.queryId?.trim()
+  const path = queryId
+    ? `/api/v1/ext/metadata-queries/${encodeURIComponent(queryId)}`
+    : '/api/v1/ext/metadata-queries'
+
+  return request<SavedMetadataQueryResponse>(path, {
+    auth,
+    baseUrl,
+    method: queryId ? 'PUT' : 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      name: payload.name ?? '',
+      description: payload.description ?? '',
+      query: payload.query,
+    }),
+  })
+}
+
+export async function deleteSavedMetadataQuery(
+  queryId: string,
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  const normalizedQueryId = requireNonEmptyValue(queryId, 'query_id')
+  const response = await fetch(
+    buildUrl(`/api/v1/ext/metadata-queries/${encodeURIComponent(normalizedQueryId)}`, baseUrl),
+    {
+      method: 'DELETE',
+      headers: {
+        Accept: 'application/json',
+        ...buildHeaders(auth),
+      },
+    },
+  )
+
+  if (!response.ok) {
+    let payload: ApiErrorPayload | null = null
+
+    try {
+      payload = (await response.json()) as ApiErrorPayload
+    } catch {
+      // Use a generic message when the server does not return JSON so HTML error
+      // pages are never reflected into the UI.
+    }
+
+    throw new ApiError(
+      response.status,
+      payload?.message ?? 'Request failed. The server returned an unexpected response.',
+      payload?.code ?? payload?.error,
+      payload?.fields,
+    )
+  }
 }
 
 export function getS3BucketByPath(irodsPath: string, auth: RequestAuth, baseUrl?: string) {
@@ -943,6 +1139,27 @@ export function getPathChildren(
   return request<PathChildrenResponse>(`/api/v1/path/children?${params.toString()}`, {
     auth,
     baseUrl,
+  })
+}
+
+export function queryPathEntries(
+  payload: EntryQueryDefinition & {
+    limit?: number
+    page_token?: string
+    include_totals?: boolean
+    include_matched_avus?: boolean
+  },
+  auth: RequestAuth,
+  baseUrl?: string,
+) {
+  return request<PathQueryResponse>('/api/v1/path/query', {
+    auth,
+    baseUrl,
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
   })
 }
 
