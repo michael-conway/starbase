@@ -8,9 +8,6 @@ Title: Starbase
 Subtitle: iRODS Grid Stack
 RestAPIBaseURL: http://localhost:8080
 
-# Legacy backend /web/login flow fallback used when direct PKCE keys are absent.
-OIDCEndpoint: /web/login
-
 # Direct browser PKCE sign-in (starbase -> keycloak -> starbase callback).
 OIDCAuthorizationEndpoint: https://localhost:8443/realms/drs/protocol/openid-connect/auth
 OIDCTokenEndpoint: https://localhost:8443/realms/drs/protocol/openid-connect/token

@@ -225,7 +225,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         setSecrets(defaultSecrets)
       },
     }),
-    [connection, effectiveUsername, isAuthenticated, oidcDerivedUsername, preferences, secrets],
+    [connection, effectiveUsername, isAuthenticated, preferences, secrets],
   )
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>

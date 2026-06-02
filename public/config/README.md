@@ -4,6 +4,9 @@
 - The older `irods-go-drs` Docker Compose framework is deprecated for Starbase
   development.
 - Default file loaded at startup: `/config/starbase.yaml`
+- For `1.0.0-alpha`, the bundled `starbase.yaml` remains an
+  `irods-grid-stack` localhost preset. Published deployments should replace it
+  with deployment-specific REST and OIDC endpoints.
 - Optional direct path override:
   - Set `VITE_STARBASE_CONFIG_PATH=<path>`
   - Startup file becomes `<path>`
@@ -20,14 +23,9 @@ Supported keys:
 - `Title`: app title text shown in the top header.
 - `Subtitle`: app subtitle text shown under the title.
 - `RestAPIBaseURL`: default browser-facing `irods-go-rest` base URL used by
-  the login form and API calls when the user has not selected another endpoint.
+  API calls.
   For `irods-grid-stack`, use the provider REST host URL
   `http://localhost:8080`. Leave blank to use same-origin relative API paths.
-- `OIDCEndpoint`: OIDC login endpoint opened by the sign-in button. Can be:
-  - a site-relative path (for example `/web/login`)
-  - an absolute URL (`https://auth.example.org/login`)
-  - a path including callback parameters (for example
-    `/web/login?redirect_uri=https://starbase.example.org/callback`)
 - `OIDCAuthorizationEndpoint`: authorization endpoint for direct browser PKCE
   sign-in (for example
   `https://localhost:8443/realms/drs/protocol/openid-connect/auth`).
@@ -38,9 +36,8 @@ Supported keys:
 - `OIDCRedirectPath`: Starbase callback path for PKCE flow (default
   `/auth/callback`; callback URL becomes `<starbase-origin><OIDCRedirectPath>`.
   Route handling is mounted under `/auth/*`.
-  When `OIDCAuthorizationEndpoint`, `OIDCTokenEndpoint`, and `OIDCClientID`
-  are all configured, Starbase uses direct PKCE flow and `OIDCEndpoint` is only
-  used as fallback.
+  `OIDCAuthorizationEndpoint`, `OIDCTokenEndpoint`, and `OIDCClientID` are
+  required for OIDC sign-in.
 - `AuthMode`: list of basic auth mode options.
 - `S3AdminEnabled`: enables S3 administration tools, including collection bucket
   mappings and user S3 API secret settings.
@@ -58,7 +55,6 @@ Minimal example:
 Title: Starbase
 Subtitle: iRODS Grid Stack
 RestAPIBaseURL: http://localhost:8080
-OIDCEndpoint: /web/login
 OIDCAuthorizationEndpoint: https://localhost:8443/realms/drs/protocol/openid-connect/auth
 OIDCTokenEndpoint: https://localhost:8443/realms/drs/protocol/openid-connect/token
 OIDCClientID: starbase-spa

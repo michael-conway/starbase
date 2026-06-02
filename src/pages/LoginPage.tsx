@@ -26,7 +26,6 @@ import {
 import type { AuthMode } from '../lib/irods-rest'
 import {
   hasDirectOidcPkceConfig,
-  resolveOidcEndpointUrl,
   resolveOidcPkceRedirectUri,
   resolveOidcPkceUrl,
 } from '../config/starbase-config'
@@ -48,7 +47,6 @@ export function LoginPage() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [oidcError, setOidcError] = useState<string | null>(null)
-  const oidcEndpointUrl = resolveOidcEndpointUrl(baseUrl, appConfig.config.oidcEndpoint)
   const directPkceEnabled = hasDirectOidcPkceConfig(appConfig.config)
   const oidcAuthorizationUrl = resolveOidcPkceUrl(appConfig.config.oidcAuthorizationEndpoint)
   const oidcRedirectUri = resolveOidcPkceRedirectUri(appConfig.config.oidcRedirectPath)
@@ -75,29 +73,25 @@ export function LoginPage() {
   const beginOidcSignIn = async () => {
     setOidcError(null)
 
-    if (
-      directPkceEnabled &&
-      oidcAuthorizationUrl &&
-      oidcTokenEndpoint &&
-      oidcClientId &&
-      oidcRedirectUri
-    ) {
-      try {
-        const authorizationUrl = await startOidcPkceSignIn({
-          authorizationEndpoint: oidcAuthorizationUrl,
-          clientId: oidcClientId,
-          scope: oidcScope,
-          redirectUri: oidcRedirectUri,
-          baseUrl,
-        })
-        window.location.assign(authorizationUrl)
-      } catch (error) {
-        setOidcError(error instanceof Error ? error.message : 'Unable to start OIDC sign-in.')
-      }
+    if (!directPkceEnabled || !oidcAuthorizationUrl || !oidcTokenEndpoint || !oidcClientId) {
+      setOidcError(
+        'OIDC sign-in requires OIDCAuthorizationEndpoint, OIDCTokenEndpoint, and OIDCClientID in starbase.yaml.',
+      )
       return
     }
 
-    window.open(oidcEndpointUrl, '_blank', 'noopener,noreferrer')
+    try {
+      const authorizationUrl = await startOidcPkceSignIn({
+        authorizationEndpoint: oidcAuthorizationUrl,
+        clientId: oidcClientId,
+        scope: oidcScope,
+        redirectUri: oidcRedirectUri,
+        baseUrl,
+      })
+      window.location.assign(authorizationUrl)
+    } catch (error) {
+      setOidcError(error instanceof Error ? error.message : 'Unable to start OIDC sign-in.')
+    }
   }
 
   return (

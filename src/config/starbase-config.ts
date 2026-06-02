@@ -7,7 +7,6 @@ export interface StarbaseConfig {
   title: string
   subtitle: string
   restApiBaseUrl: string
-  oidcEndpoint: string
   oidcAuthorizationEndpoint: string
   oidcTokenEndpoint: string
   oidcClientId: string
@@ -23,7 +22,6 @@ export const defaultStarbaseConfig: StarbaseConfig = {
   title: 'Starbase',
   subtitle: 'iRODS Explorer',
   restApiBaseUrl: buildTimeRestApiBaseUrl,
-  oidcEndpoint: '/web/login',
   oidcAuthorizationEndpoint: '',
   oidcTokenEndpoint: '',
   oidcClientId: '',
@@ -63,19 +61,6 @@ function normalizeBaseUrl(value: string) {
   return trimmed.replace(/\/+$/, '')
 }
 
-function normalizeOidcEndpoint(value: string) {
-  const trimmed = value.trim()
-  if (!trimmed) {
-    return defaultStarbaseConfig.oidcEndpoint
-  }
-
-  if (/^https?:\/\//i.test(trimmed)) {
-    return trimmed
-  }
-
-  return trimmed.startsWith('/') ? trimmed : `/${trimmed}`
-}
-
 function normalizeOptionalOidcUrlOrPath(value: string) {
   const trimmed = value.trim()
   if (!trimmed) {
@@ -101,16 +86,6 @@ function normalizeOidcRedirectPath(value: string) {
   }
 
   return trimmed.startsWith('/') ? trimmed : `/${trimmed}`
-}
-
-export function resolveOidcEndpointUrl(baseUrl: string, oidcEndpoint: string) {
-  const normalizedEndpoint = normalizeOidcEndpoint(oidcEndpoint)
-  if (/^https?:\/\//i.test(normalizedEndpoint)) {
-    return normalizedEndpoint
-  }
-
-  const normalizedBaseUrl = normalizeBaseUrl(baseUrl)
-  return normalizedBaseUrl ? `${normalizedBaseUrl}${normalizedEndpoint}` : normalizedEndpoint
 }
 
 export function resolveOidcPkceUrl(pathOrUrl: string) {
@@ -321,9 +296,6 @@ export function parseStarbaseYamlConfig(yaml: string): StarbaseConfig {
   const restApiBaseUrl = normalizeBaseUrl(
     parseStringKey(lines, 'RestAPIBaseURL', defaultStarbaseConfig.restApiBaseUrl),
   )
-  const oidcEndpoint = normalizeOidcEndpoint(
-    parseStringKey(lines, 'OIDCEndpoint', defaultStarbaseConfig.oidcEndpoint),
-  )
   const oidcAuthorizationEndpoint = normalizeOptionalOidcUrlOrPath(
     parseStringKey(
       lines,
@@ -353,7 +325,6 @@ export function parseStarbaseYamlConfig(yaml: string): StarbaseConfig {
     title,
     subtitle,
     restApiBaseUrl,
-    oidcEndpoint,
     oidcAuthorizationEndpoint,
     oidcTokenEndpoint,
     oidcClientId,
