@@ -1,5 +1,5 @@
 import { Loader, Stack } from '@mantine/core'
-import { Navigate, Outlet } from 'react-router-dom'
+import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { useSession } from './providers/use-session'
 
 export function HomeRedirect() {
@@ -9,9 +9,11 @@ export function HomeRedirect() {
 
 export function RequireSession() {
   const { isAuthenticated } = useSession()
+  const location = useLocation()
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />
+    const returnTo = `${location.pathname}${location.search}${location.hash}`
+    return <Navigate to={`/login?returnTo=${encodeURIComponent(returnTo)}`} replace />
   }
 
   return <Outlet />

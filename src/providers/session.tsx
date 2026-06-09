@@ -4,7 +4,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import type { RequestAuth } from '../lib/irods-rest'
+import { addBearerTokenExpiredListener, type RequestAuth } from '../lib/irods-rest'
 import {
   SessionContext,
   type SessionContextValue,
@@ -92,6 +92,17 @@ function oidcUsernameFromToken(token: string) {
   return ''
 }
 
+function isJwtExpired(token: string) {
+  const payload = decodeJwtPayload(token.trim())
+  const expiresAt = payload?.exp
+
+  if (typeof expiresAt !== 'number') {
+    return false
+  }
+
+  return Date.now() >= expiresAt * 1000
+}
+
 function readLocalStorage<T>(key: string, fallback: T): T {
   try {
     const raw = window.localStorage.getItem(key)
@@ -144,6 +155,26 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     window.sessionStorage.setItem(secretsStorageKey, JSON.stringify(secrets))
   }, [secrets])
 
+  useEffect(() => {
+    return addBearerTokenExpiredListener(() => {
+      setSecrets((current) => ({
+        ...current,
+        token: '',
+      }))
+    })
+  }, [])
+
+  useEffect(() => {
+    if (preferences.authMode !== 'oidc' || !secrets.token || !isJwtExpired(secrets.token)) {
+      return
+    }
+
+    setSecrets((current) => ({
+      ...current,
+      token: '',
+    }))
+  }, [preferences.authMode, secrets.token])
+
   const connection = useMemo(() => {
     const auth: RequestAuth =
       preferences.authMode === 'basic'
@@ -167,7 +198,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const isAuthenticated =
     preferences.authMode === 'basic'
       ? Boolean(secrets.username && secrets.password)
-      : Boolean(secrets.token)
+      : Boolean(secrets.token && !isJwtExpired(secrets.token))
   const oidcDerivedUsername = useMemo(
     () => oidcUsernameFromToken(secrets.token),
     [secrets.token],

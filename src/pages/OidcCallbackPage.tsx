@@ -13,6 +13,17 @@ import { useSession } from '../providers/use-session'
 interface OidcExchangeResult {
   accessToken: string
   baseUrl: string
+  returnTo: string
+}
+
+function safeReturnTo(value: string) {
+  const trimmed = value.trim()
+
+  if ((trimmed !== '/app' && !trimmed.startsWith('/app/')) || trimmed.startsWith('//')) {
+    return '/app/explorer'
+  }
+
+  return trimmed
 }
 
 const inFlightOidcExchanges = new Map<string, Promise<OidcExchangeResult>>()
@@ -41,6 +52,7 @@ export function OidcCallbackPage() {
   const { isAuthenticated, signInOidc } = useSession()
   const [error, setError] = useState<string | null>(null)
   const [isCompleting, setIsCompleting] = useState(true)
+  const [returnTo, setReturnTo] = useState('/app/explorer')
 
   useEffect(() => {
     let cancelled = false
@@ -101,6 +113,7 @@ export function OidcCallbackPage() {
         const result = await exchange
 
         if (!cancelled) {
+          setReturnTo(safeReturnTo(result.returnTo))
           signInOidc({
             token: result.accessToken,
             baseUrl: result.baseUrl,
@@ -128,7 +141,7 @@ export function OidcCallbackPage() {
   }, [config, location.search, signInOidc])
 
   if (isAuthenticated) {
-    return <Navigate to="/app/explorer" replace />
+    return <Navigate to={returnTo} replace />
   }
 
   return (
