@@ -1511,6 +1511,7 @@ function MatchedAVUTable({ absolutePath, avus }: { absolutePath: string; avus: A
       <Table verticalSpacing="xs">
         <Table.Thead>
           <Table.Tr>
+            <Table.Th>ID</Table.Th>
             <Table.Th>Attribute</Table.Th>
             <Table.Th>Value</Table.Th>
             <Table.Th>Unit</Table.Th>
@@ -1518,7 +1519,8 @@ function MatchedAVUTable({ absolutePath, avus }: { absolutePath: string; avus: A
         </Table.Thead>
         <Table.Tbody>
           {avus.map((avu, index) => (
-            <Table.Tr key={`${avu.attrib}-${avu.value}-${avu.unit ?? ''}-${index}`}>
+            <Table.Tr key={avu.id || `${avu.attrib}-${avu.value}-${avu.unit ?? ''}-${index}`}>
+              <Table.Td>{avu.id ? <Code>{avu.id}</Code> : '—'}</Table.Td>
               <Table.Td>
                 <Code>{avu.attrib}</Code>
               </Table.Td>
@@ -1528,7 +1530,7 @@ function MatchedAVUTable({ absolutePath, avus }: { absolutePath: string; avus: A
           ))}
           {!avus.length ? (
             <Table.Tr>
-              <Table.Td colSpan={3}>
+              <Table.Td colSpan={4}>
                 <Text size="sm" c="dimmed">
                   No matched AVUs returned.
                 </Text>

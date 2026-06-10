@@ -164,17 +164,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
-  useEffect(() => {
-    if (preferences.authMode !== 'oidc' || !secrets.token || !isJwtExpired(secrets.token)) {
-      return
-    }
-
-    setSecrets((current) => ({
-      ...current,
-      token: '',
-    }))
-  }, [preferences.authMode, secrets.token])
-
   const connection = useMemo(() => {
     const auth: RequestAuth =
       preferences.authMode === 'basic'

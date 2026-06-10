@@ -580,6 +580,14 @@ function requireNonEmptyValue(value: string, fieldName: string) {
   return normalized
 }
 
+function normalizeAVUPayload(payload: { attrib: string; value: string; unit?: string }) {
+  return {
+    attrib: requireNonEmptyValue(payload.attrib, 'attrib'),
+    value: requireNonEmptyValue(payload.value, 'value'),
+    unit: payload.unit?.trim() ?? '',
+  }
+}
+
 const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? ''
 
 function resolveBaseUrl(baseUrl?: string) {
@@ -1581,6 +1589,8 @@ export function updateAVU(
   auth: RequestAuth,
   baseUrl?: string,
 ) {
+  const requestPayload = normalizeAVUPayload(payload)
+
   return request<{ avu?: AVUEntry }>(action.href, {
     auth,
     baseUrl,
@@ -1588,7 +1598,7 @@ export function updateAVU(
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(requestPayload),
   })
 }
 
@@ -1617,6 +1627,8 @@ export function addAVU(
   auth: RequestAuth,
   baseUrl?: string,
 ) {
+  const requestPayload = normalizeAVUPayload(payload)
+
   return request<{ avu?: AVUEntry }>(action.href, {
     auth,
     baseUrl,
@@ -1624,7 +1636,7 @@ export function addAVU(
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(requestPayload),
   })
 }
 
