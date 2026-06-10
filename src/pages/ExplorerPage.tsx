@@ -1594,72 +1594,76 @@ export function ExplorerPage() {
             </div>
 
             <div className="explorer-menubar">
-            <Button
-              leftSection={<IconPlus size={16} />}
-              variant="light"
-              onClick={() => openCreateModal('collection')}
-              disabled={entry?.kind !== 'collection'}
-            >
-              New folder
-            </Button>
-            <Button
-              leftSection={<IconPlus size={16} />}
-              variant="light"
-              onClick={() => openCreateModal('data_object')}
-              disabled={entry?.kind !== 'collection'}
-            >
-              New file
-            </Button>
-            <Button
-              leftSection={<IconUpload size={16} />}
-              variant="default"
-              onClick={() =>
-                openFilePicker({
-                  targetPath: selectedPath,
-                  targetLabel: displayName(selectedPath),
-                })
-              }
-              disabled={entry?.kind !== 'collection'}
-            >
-              Upload
-            </Button>
-            <Button
-              leftSection={<IconRefresh size={16} />}
-              variant="light"
-              onClick={() => refreshMutation.mutate()}
-              loading={refreshMutation.isPending}
-            >
-              Refresh
-            </Button>
-            <Button
-              leftSection={<IconSearch size={16} />}
-              variant="light"
-              onClick={() => {
-                const params = new URLSearchParams({
-                  scope_root: selectedPath,
-                })
-                navigate(`/app/search/queries/new?${params.toString()}`)
-              }}
-              disabled={entry?.kind !== 'collection'}
-            >
-              Search from here
-            </Button>
-            <Button
-              leftSection={<IconDots size={16} />}
-              variant="light"
-              onClick={() => openDetails(selectedPath)}
-              disabled={entry?.kind !== 'collection'}
-            >
-              Collection details
-            </Button>
-            <TextInput
-              placeholder={userHomePath}
-              value={draftPath}
-              onChange={(event) => setDraftPath(event.currentTarget.value)}
-              className="explorer-path-input"
-            />
-            <Button onClick={() => void openPath(draftPath)}>Open path</Button>
-          </div>
+              <div className="explorer-actionbar">
+                <Button
+                  leftSection={<IconPlus size={16} />}
+                  variant="light"
+                  onClick={() => openCreateModal('collection')}
+                  disabled={entry?.kind !== 'collection'}
+                >
+                  New folder
+                </Button>
+                <Button
+                  leftSection={<IconPlus size={16} />}
+                  variant="light"
+                  onClick={() => openCreateModal('data_object')}
+                  disabled={entry?.kind !== 'collection'}
+                >
+                  New file
+                </Button>
+                <Button
+                  leftSection={<IconUpload size={16} />}
+                  variant="default"
+                  onClick={() =>
+                    openFilePicker({
+                      targetPath: selectedPath,
+                      targetLabel: displayName(selectedPath),
+                    })
+                  }
+                  disabled={entry?.kind !== 'collection'}
+                >
+                  Upload
+                </Button>
+                <Button
+                  leftSection={<IconRefresh size={16} />}
+                  variant="light"
+                  onClick={() => refreshMutation.mutate()}
+                  loading={refreshMutation.isPending}
+                >
+                  Refresh
+                </Button>
+                <Button
+                  leftSection={<IconSearch size={16} />}
+                  variant="light"
+                  onClick={() => {
+                    const params = new URLSearchParams({
+                      scope_root: selectedPath,
+                    })
+                    navigate(`/app/search/queries/new?${params.toString()}`)
+                  }}
+                  disabled={entry?.kind !== 'collection'}
+                >
+                  Search from here
+                </Button>
+                <Button
+                  leftSection={<IconDots size={16} />}
+                  variant="light"
+                  onClick={() => openDetails(selectedPath)}
+                  disabled={entry?.kind !== 'collection'}
+                >
+                  Collection details
+                </Button>
+              </div>
+              <div className="explorer-pathbar">
+                <TextInput
+                  placeholder={userHomePath}
+                  value={draftPath}
+                  onChange={(event) => setDraftPath(event.currentTarget.value)}
+                  className="explorer-path-input"
+                />
+                <Button onClick={() => void openPath(draftPath)}>Open path</Button>
+              </div>
+            </div>
           </div>
 
           {entryQuery.isLoading ? (

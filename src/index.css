@@ -100,8 +100,28 @@ body {
 
 .explorer-menubar {
   display: flex;
+  flex-direction: column;
   gap: 12px;
+  align-items: stretch;
+}
+
+.explorer-actionbar,
+.explorer-pathbar {
+  display: flex;
+  gap: 10px;
   align-items: center;
+}
+
+.explorer-actionbar {
+  flex-wrap: wrap;
+}
+
+.explorer-actionbar .mantine-Button-root {
+  flex: 0 0 auto;
+}
+
+.explorer-pathbar {
+  flex-wrap: nowrap;
 }
 
 .explorer-controls-panel {
@@ -140,6 +160,7 @@ body {
 
 .explorer-path-input {
   flex: 1;
+  min-width: 240px;
 }
 
 .explorer-row-selected td {
@@ -351,8 +372,20 @@ body {
   }
 
   .explorer-menubar {
+    gap: 10px;
+  }
+
+  .explorer-actionbar .mantine-Button-root {
+    flex: 1 1 160px;
+  }
+
+  .explorer-pathbar {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .explorer-path-input {
+    min-width: 0;
   }
 
   .explorer-hero-stats {
