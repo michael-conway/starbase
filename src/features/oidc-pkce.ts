@@ -2,6 +2,7 @@ interface OidcPkceTransaction {
   state: string
   codeVerifier: string
   baseUrl: string
+  returnTo: string
   createdAt: number
 }
 
@@ -11,6 +12,7 @@ interface StartOidcPkceSignInInput {
   scope: string
   redirectUri: string
   baseUrl: string
+  returnTo: string
 }
 
 interface CompleteOidcPkceSignInInput {
@@ -76,7 +78,10 @@ function loadPkceTransaction() {
       return null
     }
 
-    return parsed
+    return {
+      ...parsed,
+      returnTo: typeof parsed.returnTo === 'string' ? parsed.returnTo : '/app/explorer',
+    }
   } catch {
     return null
   }
@@ -95,6 +100,7 @@ export async function startOidcPkceSignIn(input: StartOidcPkceSignInInput) {
     state,
     codeVerifier,
     baseUrl: input.baseUrl.trim(),
+    returnTo: input.returnTo,
     createdAt: Date.now(),
   })
 
@@ -155,6 +161,7 @@ export async function completeOidcPkceSignIn(input: CompleteOidcPkceSignInInput)
   return {
     accessToken,
     baseUrl: transaction.baseUrl,
+    returnTo: transaction.returnTo,
   }
 }
 

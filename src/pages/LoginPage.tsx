@@ -2,7 +2,7 @@ import {
   useMemo,
   useState,
 } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import {
   Alert,
   Badge,
@@ -33,8 +33,24 @@ import { startOidcPkceSignIn } from '../features/oidc-pkce'
 import { useAppConfig } from '../providers/use-app-config'
 import { useSession } from '../providers/use-session'
 
+function safeReturnTo(value: string | null) {
+  const fallback = '/app/explorer'
+  const trimmed = value?.trim()
+
+  if (!trimmed || (trimmed !== '/app' && !trimmed.startsWith('/app/'))) {
+    return fallback
+  }
+
+  if (trimmed.startsWith('//')) {
+    return fallback
+  }
+
+  return trimmed
+}
+
 export function LoginPage() {
   const appConfig = useAppConfig()
+  const [searchParams] = useSearchParams()
   const {
     isAuthenticated,
     preferences,
@@ -47,6 +63,7 @@ export function LoginPage() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [oidcError, setOidcError] = useState<string | null>(null)
+  const returnTo = safeReturnTo(searchParams.get('returnTo'))
   const directPkceEnabled = hasDirectOidcPkceConfig(appConfig.config)
   const oidcAuthorizationUrl = resolveOidcPkceUrl(appConfig.config.oidcAuthorizationEndpoint)
   const oidcRedirectUri = resolveOidcPkceRedirectUri(appConfig.config.oidcRedirectPath)
@@ -67,7 +84,7 @@ export function LoginPage() {
       : (basicAuthOptions[0]?.value ?? 'native')
 
   if (isAuthenticated) {
-    return <Navigate to="/app/explorer" replace />
+    return <Navigate to={returnTo} replace />
   }
 
   const beginOidcSignIn = async () => {
@@ -87,6 +104,7 @@ export function LoginPage() {
         scope: oidcScope,
         redirectUri: oidcRedirectUri,
         baseUrl,
+        returnTo,
       })
       window.location.assign(authorizationUrl)
     } catch (error) {

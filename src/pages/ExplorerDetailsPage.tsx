@@ -95,6 +95,7 @@ import {
   type PathEntry,
   type S3Bucket,
   type TicketEntry,
+  updateAVU,
   updatePathACL,
   updateTicket,
   upsertS3Bucket,
@@ -148,6 +149,25 @@ interface ACLPermissionState {
 
 type ACLPermissionKey = keyof ACLPermissionState
 
+interface AVUFormState {
+  attrib: string
+  value: string
+  unit: string
+}
+
+interface AVURow {
+  id: string
+  attrib: string
+  value: string
+  unit?: string
+  created_at?: string
+  updated_at?: string
+  links?: {
+    update?: ActionLink
+    delete?: ActionLink
+  }
+}
+
 interface ACLPrincipalOption {
   value: string
   label: string
@@ -172,27 +192,16 @@ function avuCreateAction(entry?: Pick<PathEntry, 'links'>): ActionLink | undefin
 }
 
 function avuRows(
-  avus?: {
-    id: string
-    attrib: string
-    value: string
-    unit?: string
-    created_at?: string
-    updated_at?: string
-    links?: {
-      delete?: { href: string; method?: string }
-    }
-  }[],
+  avus?: AVURow[],
   options?: {
-    onDelete: (avu: {
-      id: string
-      attrib: string
-      value: string
-      unit?: string
-      links?: {
-        delete?: { href: string; method?: string }
-      }
-    }) => void
+    editingAVUId?: string
+    form: AVUFormState
+    isSaving: boolean
+    onCancelEdit: () => void
+    onChange: (form: AVUFormState) => void
+    onDelete: (avu: AVURow) => void
+    onEdit: (avu: AVURow) => void
+    onSubmitEdit: () => void
   },
 ) {
   if (!avus || avus.length === 0) {
@@ -209,14 +218,76 @@ function avuRows(
 
   return avus.map((avu) => (
     <Table.Tr key={`${avu.id}-${avu.attrib}`}>
-      <Table.Td>
-        <Code>{avu.attrib}</Code>
-      </Table.Td>
-      <Table.Td>{avu.value}</Table.Td>
-      <Table.Td>{avu.unit ?? '—'}</Table.Td>
+      {options?.editingAVUId === avu.id ? (
+        <>
+          <Table.Td>
+            <TextInput
+              placeholder="Attribute"
+              value={options.form.attrib}
+              onChange={(event) =>
+                options.onChange({
+                  ...options.form,
+                  attrib: event.currentTarget.value,
+                })
+              }
+            />
+          </Table.Td>
+          <Table.Td>
+            <TextInput
+              placeholder="Value"
+              value={options.form.value}
+              onChange={(event) =>
+                options.onChange({
+                  ...options.form,
+                  value: event.currentTarget.value,
+                })
+              }
+            />
+          </Table.Td>
+          <Table.Td>
+            <TextInput
+              placeholder="Unit"
+              value={options.form.unit}
+              onChange={(event) =>
+                options.onChange({
+                  ...options.form,
+                  unit: event.currentTarget.value,
+                })
+              }
+            />
+          </Table.Td>
+        </>
+      ) : (
+        <>
+          <Table.Td>
+            <Code>{avu.attrib}</Code>
+          </Table.Td>
+          <Table.Td>{avu.value}</Table.Td>
+          <Table.Td>{avu.unit ?? '—'}</Table.Td>
+        </>
+      )}
       <Table.Td>
         <Group gap="xs" wrap="nowrap">
-          {avu.links?.delete ? (
+          {options?.editingAVUId === avu.id ? (
+            <>
+              <Button size="xs" onClick={options.onSubmitEdit} loading={options.isSaving}>
+                Update
+              </Button>
+              <Button size="xs" variant="default" onClick={options.onCancelEdit}>
+                Cancel
+              </Button>
+            </>
+          ) : null}
+          {options?.editingAVUId !== avu.id && avu.links?.update ? (
+            <ActionIcon
+              variant="subtle"
+              aria-label={`Edit AVU ${avu.attrib}`}
+              onClick={() => options?.onEdit(avu)}
+            >
+              <IconEdit size={16} />
+            </ActionIcon>
+          ) : null}
+          {options?.editingAVUId !== avu.id && avu.links?.delete ? (
             <ActionIcon
               variant="subtle"
               color="red"
@@ -226,7 +297,7 @@ function avuRows(
               <IconTrash size={16} />
             </ActionIcon>
           ) : null}
-          {!avu.links?.delete ? (
+          {options?.editingAVUId !== avu.id && !avu.links?.update && !avu.links?.delete ? (
             <Text size="sm" c="dimmed">
               Unavailable
             </Text>
@@ -496,7 +567,8 @@ export function ExplorerDetailsPage() {
     return params.toString()
   }, [explorerQuery])
   const [isAddingAVU, setIsAddingAVU] = useState(false)
-  const [avuForm, setAVUForm] = useState({
+  const [editingAVU, setEditingAVU] = useState<AVURow | null>(null)
+  const [avuForm, setAVUForm] = useState<AVUFormState>({
     attrib: '',
     value: '',
     unit: '',
@@ -774,6 +846,39 @@ export function ExplorerDetailsPage() {
     onError: (error: Error) => {
       notifications.show({
         title: 'AVU add failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+  const updateAVUMutation = useMutation({
+    mutationFn: (input: {
+      href: ActionLink
+      attrib: string
+      value: string
+      unit?: string
+    }) =>
+      updateAVU(
+        input.href,
+        {
+          attrib: input.attrib,
+          value: input.value,
+          unit: input.unit,
+        },
+        connection.auth,
+        connection.baseUrl,
+      ),
+    onSuccess: async () => {
+      notifications.show({
+        title: 'AVU updated',
+        message: 'Metadata entry replaced.',
+        color: 'teal',
+      })
+      await avuQuery.refetch()
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'AVU update failed',
         message: error.message,
         color: 'red',
       })
@@ -1554,13 +1659,7 @@ export function ExplorerDetailsPage() {
     navigate(`/app/resources/details?name=${encodeURIComponent(trimmedName)}`)
   }
 
-  const beginAVUDelete = (avu: {
-    attrib: string
-    value: string
-    links?: {
-      delete?: { href: string; method?: string }
-    }
-  }) => {
+  const beginAVUDelete = (avu: AVURow) => {
     if (!avu.links?.delete) {
       return
     }
@@ -1580,6 +1679,7 @@ export function ExplorerDetailsPage() {
     if (!avuAction) {
       return
     }
+    setEditingAVU(null)
     setIsAddingAVU(true)
     setAVUForm({
       attrib: '',
@@ -1590,11 +1690,56 @@ export function ExplorerDetailsPage() {
 
   const cancelAVUEditor = () => {
     setIsAddingAVU(false)
+    setEditingAVU(null)
     setAVUForm({
       attrib: '',
       value: '',
       unit: '',
     })
+  }
+
+  const beginAVUEdit = (avu: AVURow) => {
+    if (!avu.links?.update) {
+      return
+    }
+
+    setIsAddingAVU(false)
+    setEditingAVU(avu)
+    setAVUForm({
+      attrib: avu.attrib,
+      value: avu.value,
+      unit: avu.unit ?? '',
+    })
+  }
+
+  const submitAVUUpdate = () => {
+    if (!editingAVU?.links?.update) {
+      return
+    }
+
+    if (!avuForm.attrib.trim() || !avuForm.value.trim()) {
+      notifications.show({
+        title: 'AVU is incomplete',
+        message: 'Attribute and value are required.',
+        color: 'red',
+      })
+      return
+    }
+
+    updateAVUMutation.mutate(
+      {
+        href: editingAVU.links.update,
+        attrib: avuForm.attrib.trim(),
+        value: avuForm.value.trim(),
+        unit: avuForm.unit.trim(),
+      },
+      {
+        onSuccess: async () => {
+          cancelAVUEditor()
+          await avuQuery.refetch()
+        },
+      },
+    )
   }
 
   const submitAVUEditor = () => {
@@ -3461,7 +3606,7 @@ export function ExplorerDetailsPage() {
                                           onClick={submitAVUEditor}
                                           loading={addAVUMutation.isPending}
                                         >
-                                          Update
+                                          Add
                                         </Button>
                                         <Button size="xs" variant="default" onClick={cancelAVUEditor}>
                                           Cancel
@@ -3471,7 +3616,14 @@ export function ExplorerDetailsPage() {
                                   </Table.Tr>
                                 ) : (
                                   avuRows(avuQuery.data?.avus, {
+                                    editingAVUId: editingAVU?.id,
+                                    form: avuForm,
+                                    isSaving: updateAVUMutation.isPending,
+                                    onCancelEdit: cancelAVUEditor,
+                                    onChange: setAVUForm,
                                     onDelete: beginAVUDelete,
+                                    onEdit: beginAVUEdit,
+                                    onSubmitEdit: submitAVUUpdate,
                                   })
                                 )}
                               </Table.Tbody>

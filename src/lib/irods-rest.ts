@@ -522,6 +522,28 @@ export interface RequestAuth {
   token?: string
 }
 
+const bearerTokenExpiredEventName = 'starbase:bearer-token-expired'
+
+export function addBearerTokenExpiredListener(listener: () => void) {
+  if (typeof window === 'undefined') {
+    return () => {}
+  }
+
+  const eventListener = () => listener()
+  window.addEventListener(bearerTokenExpiredEventName, eventListener)
+  return () => window.removeEventListener(bearerTokenExpiredEventName, eventListener)
+}
+
+function notifyBearerTokenExpired(status: number, auth?: RequestAuth) {
+  if (status !== 401 || auth?.mode !== 'oidc' || !auth.token) {
+    return
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(bearerTokenExpiredEventName))
+  }
+}
+
 export class ApiError extends Error {
   status: number
   code?: string
@@ -556,6 +578,14 @@ function requireNonEmptyValue(value: string, fieldName: string) {
   }
 
   return normalized
+}
+
+function normalizeAVUPayload(payload: { attrib: string; value: string; unit?: string }) {
+  return {
+    attrib: requireNonEmptyValue(payload.attrib, 'attrib'),
+    value: requireNonEmptyValue(payload.value, 'value'),
+    unit: payload.unit?.trim() ?? '',
+  }
 }
 
 const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? ''
@@ -623,7 +653,9 @@ function parseFilenameFromContentDisposition(value: string | null) {
   return plainMatch?.[1]
 }
 
-function buildApiError(status: number, payload?: ApiErrorPayload | null) {
+function buildApiError(status: number, payload?: ApiErrorPayload | null, auth?: RequestAuth) {
+  notifyBearerTokenExpired(status, auth)
+
   return new ApiError(
     status,
     payload?.message ?? 'Request failed. The server returned an unexpected response.',
@@ -663,12 +695,7 @@ async function request<T>(
       // pages are never reflected into the UI.
     }
 
-    throw new ApiError(
-      response.status,
-      payload?.message ?? 'Request failed. The server returned an unexpected response.',
-      payload?.code ?? payload?.error,
-      payload?.fields,
-    )
+    throw buildApiError(response.status, payload, options?.auth)
   }
 
   return (await response.json()) as T
@@ -839,12 +866,7 @@ export async function deleteSavedMetadataQuery(
       // pages are never reflected into the UI.
     }
 
-    throw new ApiError(
-      response.status,
-      payload?.message ?? 'Request failed. The server returned an unexpected response.',
-      payload?.code ?? payload?.error,
-      payload?.fields,
-    )
+    throw buildApiError(response.status, payload, auth)
   }
 }
 
@@ -909,7 +931,7 @@ export async function deleteS3Bucket(bucketId: string, auth: RequestAuth, baseUr
       // Fall back to the HTTP status when the response body is not JSON.
     }
 
-    throw buildApiError(response.status, payload)
+    throw buildApiError(response.status, payload, auth)
   }
 }
 
@@ -971,7 +993,7 @@ export async function deleteS3UserSecret(userName: string, auth: RequestAuth, ba
       // Fall back to the HTTP status when the response body is not JSON.
     }
 
-    throw buildApiError(response.status, payload)
+    throw buildApiError(response.status, payload, auth)
   }
 }
 
@@ -1064,6 +1086,7 @@ export async function removeFavorite(
       }
     }
 
+    notifyBearerTokenExpired(response.status, auth)
     throw new ApiError(
       response.status,
       payloadError?.message ?? fallbackMessage ?? `Request failed with status ${response.status}`,
@@ -1212,7 +1235,7 @@ export async function deletePath(
       // Fall back to the HTTP status when the response body is not JSON.
     }
 
-    throw buildApiError(response.status, payload)
+    throw buildApiError(response.status, payload, auth)
   }
 }
 
@@ -1342,7 +1365,7 @@ export async function deletePathByAction(
       // Fall back to the HTTP status when the response body is not JSON.
     }
 
-    throw buildApiError(response.status, payload)
+    throw buildApiError(response.status, payload, auth)
   }
 }
 
@@ -1418,7 +1441,7 @@ export function uploadPathContents(
         return
       }
 
-      reject(buildApiError(xhr.status, (parsedPayload as ApiErrorPayload | null) ?? null))
+      reject(buildApiError(xhr.status, (parsedPayload as ApiErrorPayload | null) ?? null, auth))
     }
 
     if (options?.signal) {
@@ -1551,7 +1574,7 @@ export async function downloadPath(
       // Fall back to the HTTP status when the response body is not JSON.
     }
 
-    throw buildApiError(response.status, payload)
+    throw buildApiError(response.status, payload, auth)
   }
 
   return {
@@ -1566,6 +1589,8 @@ export function updateAVU(
   auth: RequestAuth,
   baseUrl?: string,
 ) {
+  const requestPayload = normalizeAVUPayload(payload)
+
   return request<{ avu?: AVUEntry }>(action.href, {
     auth,
     baseUrl,
@@ -1573,7 +1598,7 @@ export function updateAVU(
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(requestPayload),
   })
 }
 
@@ -1592,7 +1617,7 @@ export async function deleteAVU(action: ActionLink, auth: RequestAuth, baseUrl?:
       // Fall back to the HTTP status when the response body is not JSON.
     }
 
-    throw buildApiError(response.status, payload)
+    throw buildApiError(response.status, payload, auth)
   }
 }
 
@@ -1602,6 +1627,8 @@ export function addAVU(
   auth: RequestAuth,
   baseUrl?: string,
 ) {
+  const requestPayload = normalizeAVUPayload(payload)
+
   return request<{ avu?: AVUEntry }>(action.href, {
     auth,
     baseUrl,
@@ -1609,7 +1636,7 @@ export function addAVU(
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(requestPayload),
   })
 }
 
@@ -1671,7 +1698,7 @@ export async function deletePathACL(action: ActionLink, auth: RequestAuth, baseU
       // Fall back to the HTTP status when the response body is not JSON.
     }
 
-    throw buildApiError(response.status, payload)
+    throw buildApiError(response.status, payload, auth)
   }
 }
 
@@ -1703,7 +1730,7 @@ export async function invokeActionLink(
       // Fall back to the HTTP status when the response body is not JSON.
     }
 
-    throw buildApiError(response.status, payload)
+    throw buildApiError(response.status, payload, auth)
   }
 }
 
@@ -1734,7 +1761,7 @@ export async function setPathACLInheritance(
       // Fall back to the HTTP status when the response body is not JSON.
     }
 
-    throw buildApiError(response.status, payload)
+    throw buildApiError(response.status, payload, auth)
   }
 }
 
@@ -1765,7 +1792,7 @@ export async function deletePathACLInheritance(
       // Fall back to the HTTP status when the response body is not JSON.
     }
 
-    throw buildApiError(response.status, payload)
+    throw buildApiError(response.status, payload, auth)
   }
 }
 
@@ -1833,6 +1860,7 @@ export async function deleteTicket(action: ActionLink, auth: RequestAuth, baseUr
       // Fall back to the HTTP status when the response body is not JSON.
     }
 
+    notifyBearerTokenExpired(response.status, auth)
     throw new ApiError(
       response.status,
       payload?.message ?? `Request failed with status ${response.status}`,
