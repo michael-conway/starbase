@@ -193,6 +193,153 @@ Until then:
 * keep visible navigation tightly scoped
 * avoid writing copy that over-promises incomplete areas
 
+## Sprint: Users And Groups Administration
+
+Goal: add a focused top-level Starbase function for administering iRODS users,
+groups, and group membership through `irods-go-rest`.
+
+Navigation decision:
+
+* add a primary left-nav section labeled `Users & Groups`
+* place it at the same level as `Resources`, not under a generic admin page
+* route the first usable version at `/app/users`
+* keep the existing future `AdminPage` scaffold out of the active route table
+
+Backend contract:
+
+* use `GET /api/v1/user` for user listing and prefix search
+* use `POST /api/v1/user` for user creation
+* use `GET /api/v1/user/{user_name}` for user details
+* use `PUT /api/v1/user/{user_name}` for user type/password updates
+* use `DELETE /api/v1/user/{user_name}` for user deletion
+* use `GET /api/v1/usergroup` for group listing and prefix search
+* use `POST /api/v1/usergroup` for group creation
+* use `GET /api/v1/usergroup/{group_name}` for group details and membership
+* use `DELETE /api/v1/usergroup/{group_name}` for group deletion
+* use `POST /api/v1/usergroup/{group_name}/member` to add a member
+* use `DELETE /api/v1/usergroup/{group_name}/member/{user_name}` to remove a
+  member
+
+Frontend boundary:
+
+* keep authority decisions in `irods-go-rest`; Starbase should surface `403`
+  responses clearly instead of duplicating iRODS policy
+* prefer backend-provided action links when present for mutation affordances
+* keep `src/lib/irods-rest.ts` as the only API client layer for these routes
+* do not introduce Keycloak-specific user or group workflows in this page
+* use `/api/v1/ext/*` only if a later workflow is truly extension-specific
+* observe API needs while designing each screen; if the UI needs broad
+  client-side joins, repeated per-row fetches, or catalog-wide filtering, stop
+  and propose an `irods-go-rest` route instead of normalizing inefficiency in
+  Starbase
+
+Step 1: API Client Foundation
+
+* add typed user and group models matching `api/openapi.yaml`
+* add client functions for user list, create, fetch, update, and delete
+* add client functions for group list, create, fetch, delete, add member, and
+  remove member
+* make cache-key inputs explicit: zone, prefix, user type, selected group
+* record any missing response fields or action links needed by the UI before
+  adding workaround state in the page
+* verify with `npm run lint` and `npm run build`
+
+Step 1 implementation notes:
+
+* `src/lib/irods-rest.ts` now has OpenAPI-shaped user, group, and membership
+  models plus route wrappers for the current generic `/api/v1/user*` and
+  `/api/v1/usergroup*` APIs
+* `searchUsers` and `searchGroups` remain as compatibility aliases for existing
+  ACL autocomplete code
+* explicit cache-key helpers are available for user lists, user details, group
+  lists, and group details
+* current list responses are enough for basic read-only tables; list-scale group
+  member counts, groups containing a selected user, or user rows with membership
+  summaries should be treated as backend API candidates rather than solved with
+  Starbase-side N+1 requests
+* likely efficient backend candidates, if needed in Step 3, are GenQuery-backed
+  relationship or aggregate views exposed through documented `irods-go-rest`
+  routes
+
+Step 2: Top-Level Route And Shell Entry
+
+* add a `Users & Groups` primary section in `src/app-sections.ts`
+* create a lazy-loaded `src/pages/UsersPage.tsx`
+* register `/app/users` through the existing primary-section route mapping
+* use a concrete people/group icon from Tabler
+* update README route and backend-area lists
+
+Step 3: Read-Only Users And Groups Page
+
+* implement tabs for `Users` and `Groups`
+* add zone and prefix filters
+* list users with name, type, and zone
+* list groups with name, zone, and member count when available
+* provide loading, empty, error, and unauthorized states
+* keep the first pass read-only until the data shape and navigation feel stable
+* identify inefficient data-access patterns, especially if member counts,
+  reverse membership lookup, or filtered principals require multiple requests
+  per displayed row
+
+Step 4: User Mutation Workflows
+
+* add create-user modal with name, type, optional initial password, and optional
+  zone
+* add edit-user modal for type and/or password changes
+* add delete-user confirmation
+* invalidate user queries after successful mutations
+* handle `409`, `403`, and `404` with specific user-facing messages
+
+Step 5: Group And Membership Workflows
+
+* add create-group modal
+* add group details surface with member list
+* add member by username with autocomplete-style search
+* remove member with confirmation
+* delete group with confirmation
+* invalidate group detail and group list queries after membership mutations
+
+Step 6: Integration Verification
+
+* extend env-gated integration tests for user/group list endpoints first
+* add mutation tests only when the test environment has disposable principals
+* document required test variables for mutation-safe users and groups
+* run `npm run lint`, `npm run build`, and env-gated integration checks
+
+API needs review:
+
+* compare each Starbase workflow against `../irods-go-rest/api/openapi.yaml`
+  before implementing UI-side data shaping
+* propose new backend routes when the current API requires Starbase to perform
+  N+1 group-detail fetches, client-side joins between users and groups, or
+  client-side filtering over large catalogs
+* consider GenQuery-backed `irods-go-rest` endpoints for efficient aggregate or
+  relationship views, such as group member counts, users with group membership
+  summaries, groups containing a given user, or principal search across users
+  and groups
+* keep any custom query surface path-oriented and contract-backed in
+  `irods-go-rest`; do not add ad hoc query syntax to Starbase without an
+  OpenAPI-documented REST route
+* update this sprint with concrete backend route proposals when an API gap is
+  found, including request parameters, response shape, auth expectations, and
+  whether the implementation should use GenQuery
+
+Open design questions:
+
+* should `/app/users` remain a single tabs page, or should selected users and
+  groups eventually get detail routes?
+* should mutation controls be hidden when action links are absent, or shown and
+  allowed to fail with backend `403`?
+* should `reconcile=true` be exposed in the UI, or reserved for automation and
+  integration tests?
+* should group membership be managed only from group details, or also from user
+  details once user detail routes exist?
+* does the first page need a backend aggregate endpoint for group member counts,
+  or is fetching group details on selection enough for the first usable slice?
+* should `irods-go-rest` expose a principal search endpoint that returns users
+  and groups together, or should Starbase keep separate user and group search
+  controls?
+
 ## Local Workflow
 
 Run the frontend:

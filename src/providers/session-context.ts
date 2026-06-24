@@ -1,5 +1,9 @@
 import { createContext } from 'react'
-import type { AuthMode, RequestAuth } from '../lib/irods-rest'
+import type {
+  AuthMode,
+  CurrentUserMembershipResponse,
+  RequestAuth,
+} from '../lib/irods-rest'
 
 export interface StoredPreferences {
   authMode: AuthMode
@@ -16,13 +20,19 @@ export interface SessionContextValue {
   preferences: StoredPreferences
   oidcToken: string
   basicUsername: string
+  currentUserMembership: CurrentUserMembershipResponse | null
   signInBasic: (input: {
     username: string
     password: string
     baseUrl: string
     basicAuthType: string
+    currentUserMembership: CurrentUserMembershipResponse
   }) => void
-  signInOidc: (input: { token: string; baseUrl: string }) => void
+  signInOidc: (input: {
+    token: string
+    baseUrl: string
+    currentUserMembership: CurrentUserMembershipResponse
+  }) => void
   updateBaseUrl: (baseUrl: string) => void
   setPreferredAuthMode: (mode: AuthMode) => void
   clearSession: () => void

@@ -7,6 +7,7 @@ import {
   type StarbaseConfig,
 } from '../config/starbase-config'
 import { clearOidcPkceSignInTransaction, completeOidcPkceSignIn } from '../features/oidc-pkce'
+import { getCurrentUserMembership } from '../lib/irods-rest'
 import { useAppConfig } from '../providers/use-app-config'
 import { useSession } from '../providers/use-session'
 
@@ -63,16 +64,13 @@ export function OidcCallbackPage() {
 
       const params = new URLSearchParams(location.search)
       const oauthError = params.get('error')?.trim()
-      const oauthErrorDescription = params.get('error_description')?.trim()
       const code = params.get('code')?.trim()
       const state = params.get('state')?.trim()
       const exchangeKey = code && state ? `${state}:${code}` : ''
 
       if (oauthError) {
         if (!cancelled) {
-          setError(
-            oauthErrorDescription ? `${oauthError}: ${oauthErrorDescription}` : oauthError,
-          )
+          setError('OIDC sign-in was not completed. Start sign-in again.')
           setIsCompleting(false)
         }
         return
@@ -111,23 +109,28 @@ export function OidcCallbackPage() {
         }
 
         const result = await exchange
+        const currentUserMembership = await getCurrentUserMembership(
+          {
+            mode: 'oidc',
+            token: result.accessToken,
+            suppressAuthenticationException: true,
+          },
+          result.baseUrl,
+        )
 
         if (!cancelled) {
           setReturnTo(safeReturnTo(result.returnTo))
           signInOidc({
             token: result.accessToken,
             baseUrl: result.baseUrl,
+            currentUserMembership,
           })
           setIsCompleting(false)
         }
-      } catch (completionError) {
+      } catch {
         clearOidcPkceSignInTransaction()
         if (!cancelled) {
-          setError(
-            completionError instanceof Error
-              ? completionError.message
-              : 'Unable to complete OIDC sign-in.',
-          )
+          setError('Unable to complete OIDC sign-in. Start sign-in again.')
           setIsCompleting(false)
         }
       }

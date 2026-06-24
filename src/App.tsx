@@ -70,7 +70,14 @@ function asObject(value: unknown): Record<string, unknown> {
 
 function App() {
   const appConfig = useAppConfig()
-  const { basicUsername, clearSession, connection, isAuthenticated, oidcToken } = useSession()
+  const {
+    basicUsername,
+    clearSession,
+    connection,
+    currentUserMembership,
+    isAuthenticated,
+    oidcToken,
+  } = useSession()
   const location = useLocation()
   const [menuOpened, setMenuOpened] = useState(false)
   const [serviceInfoOpened, setServiceInfoOpened] = useState(false)
@@ -99,10 +106,16 @@ function App() {
     staleTime: 60_000,
   })
   const currentUser =
-    connection.auth.mode === 'basic'
+    currentUserMembership?.current_user.user.name ||
+    (connection.auth.mode === 'basic'
       ? basicUsername || 'Unknown user'
-      : userFromOIDCToken(oidcToken) || 'OIDC user'
-  const currentZone = zoneFromSearch(location.search)
+      : userFromOIDCToken(oidcToken) || 'OIDC user')
+  const currentUserType = currentUserMembership?.current_user.user.type
+  const currentGroups = currentUserMembership?.current_user.groups ?? []
+  const currentZone =
+    currentUserMembership?.zone ||
+    currentUserMembership?.current_user.user.zone ||
+    zoneFromSearch(location.search)
   const authModeLabel = connection.auth.mode === 'basic' ? 'Basic auth' : 'OIDC'
   const appTitle = appConfig.config.title?.trim() || 'Starbase'
   const appSubtitle = appConfig.config.subtitle?.trim() || 'iRODS Explorer'
@@ -329,7 +342,7 @@ function App() {
                       : 'checking'}
                 </Badge>
 
-                <Menu position="bottom-end" width={240} shadow="md">
+                <Menu position="bottom-end" width={320} shadow="md">
                   <Menu.Target>
                     <ActionIcon
                       variant="default"
@@ -395,6 +408,37 @@ function App() {
                       <Text size="sm" fw={600}>
                         {currentUser}
                       </Text>
+                      {currentUserType ? (
+                        <Badge variant="light" color="gray" w="fit-content">
+                          {currentUserType}
+                        </Badge>
+                      ) : null}
+                      <Text size="xs" c="dimmed" mt={4}>
+                        Groups
+                      </Text>
+                      {currentGroups.length > 0 ? (
+                        <Stack gap={4} style={{ maxHeight: 160, overflowY: 'auto' }}>
+                          {currentGroups.map((group) => (
+                            <Group
+                              key={`${group.zone}:${group.name}`}
+                              gap="xs"
+                              justify="space-between"
+                              wrap="nowrap"
+                            >
+                              <Text size="sm" truncate>
+                                {group.name}
+                              </Text>
+                              <Badge variant="light" color="gray" size="xs">
+                                {group.zone}
+                              </Badge>
+                            </Group>
+                          ))}
+                        </Stack>
+                      ) : (
+                        <Text size="sm" c="dimmed">
+                          No groups returned
+                        </Text>
+                      )}
                       <Text size="xs" c="dimmed" mt={4}>
                         Connection
                       </Text>

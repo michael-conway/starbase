@@ -1,10 +1,16 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
-import { addBearerTokenExpiredListener, type RequestAuth } from '../lib/irods-rest'
+import { notifications } from '@mantine/notifications'
+import {
+  addAuthenticationExceptionListener,
+  type CurrentUserMembershipResponse,
+  type RequestAuth,
+} from '../lib/irods-rest'
 import {
   SessionContext,
   type SessionContextValue,
@@ -16,6 +22,7 @@ interface SessionSecretState {
   token: string
   username: string
   password: string
+  currentUserMembership: CurrentUserMembershipResponse | null
 }
 
 const preferencesStorageKey = 'starbase.preferences'
@@ -31,6 +38,7 @@ const defaultSecrets: SessionSecretState = {
   token: '',
   username: '',
   password: '',
+  currentUserMembership: null,
 }
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
@@ -143,9 +151,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           : defaultPreferences.basicAuthType,
     }
   })
-  const [secrets, setSecrets] = useState<SessionSecretState>(() =>
-    readSessionStorage(secretsStorageKey, defaultSecrets),
-  )
+  const [secrets, setSecrets] = useState<SessionSecretState>(() => ({
+    ...defaultSecrets,
+    ...readSessionStorage<Partial<SessionSecretState>>(secretsStorageKey, defaultSecrets),
+  }))
+  const lastAuthenticationExceptionAt = useRef(0)
 
   useEffect(() => {
     window.localStorage.setItem(preferencesStorageKey, JSON.stringify(preferences))
@@ -156,11 +166,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [secrets])
 
   useEffect(() => {
-    return addBearerTokenExpiredListener(() => {
-      setSecrets((current) => ({
-        ...current,
-        token: '',
-      }))
+    return addAuthenticationExceptionListener(() => {
+      const now = Date.now()
+      const shouldNotify = now - lastAuthenticationExceptionAt.current > 1500
+      lastAuthenticationExceptionAt.current = now
+
+      setSecrets(defaultSecrets)
+
+      if (shouldNotify) {
+        notifications.show({
+          color: 'red',
+          title: 'Authentication required',
+          message:
+            'Your session has expired or your credentials are no longer valid. Sign in again to continue.',
+        })
+      }
     })
   }, [])
 
@@ -193,9 +213,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [secrets.token],
   )
   const effectiveUsername =
-    preferences.authMode === 'oidc'
+    secrets.currentUserMembership?.current_user.user.name.trim() ||
+    (preferences.authMode === 'oidc'
       ? (secrets.username.trim() || oidcDerivedUsername)
-      : secrets.username
+      : secrets.username)
 
   const value = useMemo<SessionContextValue>(
     () => ({
@@ -204,7 +225,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       preferences,
       oidcToken: secrets.token,
       basicUsername: effectiveUsername,
-      signInBasic: ({ username, password, baseUrl, basicAuthType }) => {
+      currentUserMembership: secrets.currentUserMembership,
+      signInBasic: ({
+        username,
+        password,
+        baseUrl,
+        basicAuthType,
+        currentUserMembership,
+      }) => {
         setPreferences({
           authMode: 'basic',
           baseUrl: baseUrl.trim(),
@@ -214,9 +242,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           token: '',
           username: username.trim(),
           password,
+          currentUserMembership,
         })
       },
-      signInOidc: ({ token, baseUrl }) => {
+      signInOidc: ({ token, baseUrl, currentUserMembership }) => {
         const normalizedToken = token.trim()
         setPreferences({
           authMode: 'oidc',
@@ -227,6 +256,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           token: normalizedToken,
           username: oidcUsernameFromToken(normalizedToken),
           password: '',
+          currentUserMembership,
         })
       },
       updateBaseUrl: (baseUrl) => {

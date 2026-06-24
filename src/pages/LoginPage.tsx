@@ -19,11 +19,12 @@ import {
   TextInput,
   Title,
 } from '@mantine/core'
+import { notifications } from '@mantine/notifications'
 import {
   IconKey,
   IconLock,
 } from '@tabler/icons-react'
-import type { AuthMode } from '../lib/irods-rest'
+import { ApiError, getCurrentUserMembership, type AuthMode } from '../lib/irods-rest'
 import {
   hasDirectOidcPkceConfig,
   resolveOidcPkceRedirectUri,
@@ -48,6 +49,24 @@ function safeReturnTo(value: string | null) {
   return trimmed
 }
 
+function basicSignInErrorMessage(error: unknown) {
+  if (!(error instanceof ApiError)) {
+    return 'Unable to validate sign-in. Check the service connection and try again.'
+  }
+
+  if (error.status === 401 || error.status === 403) {
+    return error.status === 403
+      ? 'The account is authenticated but is not allowed to access Starbase user information.'
+      : 'The username or password is not valid.'
+  }
+
+  if (error.status === 0) {
+    return 'Unable to reach the iRODS REST service. Check the service URL and try again.'
+  }
+
+  return 'Unable to validate sign-in. Check your credentials and try again.'
+}
+
 export function LoginPage() {
   const appConfig = useAppConfig()
   const [searchParams] = useSearchParams()
@@ -62,6 +81,8 @@ export function LoginPage() {
   const [basicAuthType, setBasicAuthType] = useState(preferences.basicAuthType)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [basicError, setBasicError] = useState<string | null>(null)
+  const [basicLoading, setBasicLoading] = useState(false)
   const [oidcError, setOidcError] = useState<string | null>(null)
   const returnTo = safeReturnTo(searchParams.get('returnTo'))
   const directPkceEnabled = hasDirectOidcPkceConfig(appConfig.config)
@@ -87,6 +108,55 @@ export function LoginPage() {
     return <Navigate to={returnTo} replace />
   }
 
+  const beginBasicSignIn = async () => {
+    const normalizedUsername = username.trim()
+    setBasicError(null)
+
+    if (!normalizedUsername || !password) {
+      const message = 'Enter a username and password.'
+      setBasicError(message)
+      notifications.show({
+        color: 'red',
+        title: 'Sign-in failed',
+        message,
+      })
+      return
+    }
+
+    setBasicLoading(true)
+
+    try {
+      const currentUserMembership = await getCurrentUserMembership(
+        {
+          mode: 'basic',
+          username: normalizedUsername,
+          password,
+          basicAuthType: effectiveBasicAuthType,
+          suppressAuthenticationException: true,
+        },
+        baseUrl,
+      )
+      signInBasic({
+        username: normalizedUsername,
+        password,
+        baseUrl,
+        basicAuthType: effectiveBasicAuthType,
+        currentUserMembership,
+      })
+    } catch (error) {
+      const message = basicSignInErrorMessage(error)
+
+      setBasicError(message)
+      notifications.show({
+        color: 'red',
+        title: 'Sign-in failed',
+        message,
+      })
+    } finally {
+      setBasicLoading(false)
+    }
+  }
+
   const beginOidcSignIn = async () => {
     setOidcError(null)
 
@@ -107,8 +177,8 @@ export function LoginPage() {
         returnTo,
       })
       window.location.assign(authorizationUrl)
-    } catch (error) {
-      setOidcError(error instanceof Error ? error.message : 'Unable to start OIDC sign-in.')
+    } catch {
+      setOidcError('Unable to start OIDC sign-in. Check the sign-in settings and try again.')
     }
   }
 
@@ -149,6 +219,11 @@ export function LoginPage() {
 
                 {mode === 'basic' ? (
                   <Stack gap="md">
+                    {basicError ? (
+                      <Alert color="red" variant="light" title="Sign-in failed">
+                        {basicError}
+                      </Alert>
+                    ) : null}
                     <Select
                       label="Auth type"
                       value={effectiveBasicAuthType}
@@ -174,14 +249,10 @@ export function LoginPage() {
                     />
                     <Button
                       leftSection={<IconLock size={16} />}
-                      onClick={() =>
-                        signInBasic({
-                          username,
-                          password,
-                          baseUrl,
-                          basicAuthType: effectiveBasicAuthType,
-                        })
-                      }
+                      loading={basicLoading}
+                      onClick={() => {
+                        void beginBasicSignIn()
+                      }}
                     >
                       Enter workspace
                     </Button>

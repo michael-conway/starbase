@@ -374,27 +374,461 @@ export interface ResourceCollectionResponse {
   }
 }
 
-export interface UserLookupEntry {
-  id?: number
+export type IRODSUserType = 'rodsuser' | 'rodsadmin' | 'groupadmin'
+export type IRODSUserMutationType = 'rodsuser' | 'rodsadmin'
+export type IRODSGroupType = 'rodsgroup'
+export type IRODSPrincipalKind = 'user' | 'group'
+export type IRODSPrincipalType = IRODSUserType | IRODSGroupType
+export type IRODSGroupMemberType = IRODSUserType
+
+export interface UserLinks {
+  self?: ActionLink
+  update?: ActionLink
+  delete?: ActionLink
+  avus?: ActionLink
+  create_avu?: ActionLink
+}
+
+export interface UserRecord {
+  id: number
   name: string
-  zone?: string
-  type?: string
+  zone: string
+  type: IRODSUserType
+  links?: UserLinks
 }
 
-export interface UserLookupResponse {
-  users: UserLookupEntry[]
+export interface UserResponse {
+  user: UserRecord
 }
 
-export interface GroupLookupEntry {
-  id?: number
+export interface UserCollectionResponse {
+  users: UserRecord[]
+  count: number
+  zone: string
+  type?: IRODSUserType
+  prefix?: string
+  links: {
+    self?: ActionLink
+    create?: ActionLink
+  }
+}
+
+export interface UserCreateRequest {
   name: string
-  zone?: string
-  type?: string
+  type: IRODSUserMutationType
+  password?: string
 }
 
-export interface GroupLookupResponse {
-  groups: GroupLookupEntry[]
+export interface UserUpdateRequest {
+  type?: IRODSUserMutationType
+  password?: string
 }
+
+export type UserLookupEntry = UserRecord
+export type UserLookupResponse = UserCollectionResponse
+
+export interface UserGroupLinks {
+  self?: ActionLink
+  delete?: ActionLink
+  add_member?: ActionLink
+  avus?: ActionLink
+  create_avu?: ActionLink
+}
+
+export interface UserGroupMemberLinks {
+  self?: ActionLink
+  remove_from_group?: ActionLink
+}
+
+export interface UserGroupMember {
+  id: number
+  name: string
+  zone: string
+  type: IRODSGroupMemberType
+  links?: UserGroupMemberLinks
+}
+
+export interface UserGroupRecord {
+  id: number
+  name: string
+  zone: string
+  type: IRODSGroupType
+  members?: UserGroupMember[]
+  links?: UserGroupLinks
+}
+
+export interface UserGroupResponse {
+  group: UserGroupRecord
+}
+
+export interface UserGroupCollectionResponse {
+  groups: UserGroupRecord[]
+  count: number
+  zone: string
+  prefix?: string
+  links: {
+    self?: ActionLink
+    create?: ActionLink
+  }
+}
+
+export interface UserGroupCreateRequest {
+  name: string
+}
+
+export interface UserGroupMemberRequest {
+  user_name: string
+}
+
+export type GroupLookupEntry = UserGroupRecord
+export type GroupLookupResponse = UserGroupCollectionResponse
+
+export interface UserGroupRef {
+  id: number
+  name: string
+  zone: string
+  type: IRODSGroupType
+}
+
+export interface UserGroupRefCollectionResponse {
+  groups: UserGroupRef[]
+  count: number
+  user_name: string
+  zone: string
+  limit?: number
+}
+
+export interface UserMembershipSummary {
+  id: number
+  name: string
+  zone: string
+  type: IRODSUserType
+  groups: UserGroupRef[]
+}
+
+export interface CurrentUserMembership {
+  user: UserRecord
+  groups: UserGroupRef[]
+  is_rodsadmin: boolean
+  is_groupadmin: boolean
+  can_administer_users_and_groups: boolean
+}
+
+export interface CurrentUserMembershipResponse {
+  current_user: CurrentUserMembership
+  zone: string
+  limit?: number
+  links?: {
+    self?: ActionLink
+    groups?: ActionLink
+  }
+}
+
+export interface UserMembershipSummaryCollectionResponse {
+  users: UserMembershipSummary[]
+  count: number
+  zone: string
+  type?: IRODSUserMutationType
+  prefix?: string
+  limit?: number
+}
+
+export interface UserGroupSummary {
+  id: number
+  name: string
+  zone: string
+  type: IRODSGroupType
+  member_count: number
+}
+
+export interface UserGroupSummaryCollectionResponse {
+  groups: UserGroupSummary[]
+  count: number
+  zone: string
+  prefix?: string
+  limit?: number
+}
+
+export interface PrincipalSearchResult {
+  id: number
+  name: string
+  zone: string
+  type: IRODSPrincipalType
+  kind: IRODSPrincipalKind
+  score: number
+}
+
+export interface PrincipalSearchResponse {
+  principals: PrincipalSearchResult[]
+  count: number
+  zone: string
+  query: string
+  kinds?: IRODSPrincipalKind[]
+  limit?: number
+}
+
+export interface UserAVUResponse {
+  user_name: string
+  zone: string
+  links?: {
+    self?: ActionLink
+    create?: ActionLink
+  }
+  avus: AVUEntry[]
+  count?: number
+  total?: number
+  offset?: number
+  limit?: number
+}
+
+export interface UserAVUSingleResponse {
+  user_name: string
+  zone: string
+  avu: AVUEntry
+}
+
+export interface UserGroupAVUResponse {
+  group_name: string
+  zone: string
+  links?: {
+    self?: ActionLink
+    create?: ActionLink
+  }
+  avus: AVUEntry[]
+  count?: number
+  total?: number
+  offset?: number
+  limit?: number
+}
+
+export interface UserGroupAVUSingleResponse {
+  group_name: string
+  zone: string
+  avu: AVUEntry
+}
+
+export interface UserListOptions {
+  zone?: string
+  type?: IRODSUserMutationType
+  prefix?: string
+}
+
+export interface UserMutationOptions {
+  zone?: string
+  reconcile?: boolean
+}
+
+export interface UserGroupListOptions {
+  zone?: string
+  prefix?: string
+}
+
+export interface UserGroupMutationOptions {
+  zone?: string
+  reconcile?: boolean
+}
+
+export interface LimitOptions {
+  limit?: number
+}
+
+export interface CurrentUserMembershipOptions extends LimitOptions {
+  zone?: string
+}
+
+export interface UserMembershipSummaryOptions extends UserListOptions, LimitOptions {}
+
+export interface UserGroupsForUserOptions extends LimitOptions {
+  zone?: string
+}
+
+export interface UserGroupSummaryOptions extends UserGroupListOptions, LimitOptions {}
+
+export interface PrincipalSearchOptions extends LimitOptions {
+  zone?: string
+  kinds?: IRODSPrincipalKind[]
+}
+
+export type AVUSortField = 'id' | 'attrib' | 'value' | 'unit' | 'created_at' | 'updated_at'
+
+export interface AVUListOptions {
+  zone?: string
+  attrib?: string
+  sort?: AVUSortField
+  order?: 'asc' | 'desc'
+  limit?: number
+  offset?: number
+}
+
+export interface AVUMutationOptions {
+  zone?: string
+}
+
+export const userListCacheKey = (
+  baseUrl: string | undefined,
+  authMode: AuthMode,
+  options?: UserListOptions,
+) =>
+  [
+    'users',
+    baseUrl?.trim() ?? '',
+    authMode,
+    options?.zone?.trim() ?? '',
+    options?.prefix?.trim() ?? '',
+    options?.type ?? '',
+  ] as const
+
+export const userDetailCacheKey = (
+  baseUrl: string | undefined,
+  authMode: AuthMode,
+  userName: string,
+  options?: { zone?: string },
+) =>
+  [
+    'user',
+    baseUrl?.trim() ?? '',
+    authMode,
+    userName.trim(),
+    options?.zone?.trim() ?? '',
+  ] as const
+
+export const userGroupListCacheKey = (
+  baseUrl: string | undefined,
+  authMode: AuthMode,
+  options?: UserGroupListOptions,
+) =>
+  [
+    'user-groups',
+    baseUrl?.trim() ?? '',
+    authMode,
+    options?.zone?.trim() ?? '',
+    options?.prefix?.trim() ?? '',
+  ] as const
+
+export const userGroupDetailCacheKey = (
+  baseUrl: string | undefined,
+  authMode: AuthMode,
+  groupName: string,
+  options?: { zone?: string },
+) =>
+  [
+    'user-group',
+    baseUrl?.trim() ?? '',
+    authMode,
+    groupName.trim(),
+    options?.zone?.trim() ?? '',
+  ] as const
+
+export const currentUserMembershipCacheKey = (
+  baseUrl: string | undefined,
+  authMode: AuthMode,
+  options?: CurrentUserMembershipOptions,
+) =>
+  [
+    'current-user-membership',
+    baseUrl?.trim() ?? '',
+    authMode,
+    options?.zone?.trim() ?? '',
+    options?.limit ?? '',
+  ] as const
+
+export const userMembershipSummaryCacheKey = (
+  baseUrl: string | undefined,
+  authMode: AuthMode,
+  options?: UserMembershipSummaryOptions,
+) =>
+  [
+    'user-membership-summary',
+    baseUrl?.trim() ?? '',
+    authMode,
+    options?.zone?.trim() ?? '',
+    options?.prefix?.trim() ?? '',
+    options?.type ?? '',
+    options?.limit ?? '',
+  ] as const
+
+export const userGroupsForUserCacheKey = (
+  baseUrl: string | undefined,
+  authMode: AuthMode,
+  userName: string,
+  options?: UserGroupsForUserOptions,
+) =>
+  [
+    'user-groups-for-user',
+    baseUrl?.trim() ?? '',
+    authMode,
+    userName.trim(),
+    options?.zone?.trim() ?? '',
+    options?.limit ?? '',
+  ] as const
+
+export const userGroupSummaryCacheKey = (
+  baseUrl: string | undefined,
+  authMode: AuthMode,
+  options?: UserGroupSummaryOptions,
+) =>
+  [
+    'user-group-summary',
+    baseUrl?.trim() ?? '',
+    authMode,
+    options?.zone?.trim() ?? '',
+    options?.prefix?.trim() ?? '',
+    options?.limit ?? '',
+  ] as const
+
+export const principalSearchCacheKey = (
+  baseUrl: string | undefined,
+  authMode: AuthMode,
+  query: string,
+  options?: PrincipalSearchOptions,
+) =>
+  [
+    'principal-search',
+    baseUrl?.trim() ?? '',
+    authMode,
+    query.trim(),
+    options?.zone?.trim() ?? '',
+    (options?.kinds ?? []).join(','),
+    options?.limit ?? '',
+  ] as const
+
+export const userAVUCacheKey = (
+  baseUrl: string | undefined,
+  authMode: AuthMode,
+  userName: string,
+  options?: AVUListOptions,
+) =>
+  [
+    'user-avus',
+    baseUrl?.trim() ?? '',
+    authMode,
+    userName.trim(),
+    options?.zone?.trim() ?? '',
+    options?.attrib?.trim() ?? '',
+    options?.sort ?? '',
+    options?.order ?? '',
+    options?.limit ?? '',
+    options?.offset ?? '',
+  ] as const
+
+export const userGroupAVUCacheKey = (
+  baseUrl: string | undefined,
+  authMode: AuthMode,
+  groupName: string,
+  options?: AVUListOptions,
+) =>
+  [
+    'user-group-avus',
+    baseUrl?.trim() ?? '',
+    authMode,
+    groupName.trim(),
+    options?.zone?.trim() ?? '',
+    options?.attrib?.trim() ?? '',
+    options?.sort ?? '',
+    options?.order ?? '',
+    options?.limit ?? '',
+    options?.offset ?? '',
+  ] as const
 
 export interface FavoriteLinks {
   self?: ActionLink
@@ -520,27 +954,62 @@ export interface RequestAuth {
   password?: string
   basicAuthType?: string
   token?: string
+  suppressAuthenticationException?: boolean
 }
 
-const bearerTokenExpiredEventName = 'starbase:bearer-token-expired'
+export interface AuthenticationExceptionEvent {
+  status: number
+  message: string
+}
 
-export function addBearerTokenExpiredListener(listener: () => void) {
+const authenticationExceptionEventName = 'starbase:authentication-exception'
+
+export function addAuthenticationExceptionListener(
+  listener: (event: AuthenticationExceptionEvent) => void,
+) {
   if (typeof window === 'undefined') {
     return () => {}
   }
 
-  const eventListener = () => listener()
-  window.addEventListener(bearerTokenExpiredEventName, eventListener)
-  return () => window.removeEventListener(bearerTokenExpiredEventName, eventListener)
+  const eventListener = (event: Event) => {
+    const customEvent = event as CustomEvent<AuthenticationExceptionEvent>
+    listener(customEvent.detail)
+  }
+  window.addEventListener(authenticationExceptionEventName, eventListener)
+  return () => window.removeEventListener(authenticationExceptionEventName, eventListener)
 }
 
-function notifyBearerTokenExpired(status: number, auth?: RequestAuth) {
-  if (status !== 401 || auth?.mode !== 'oidc' || !auth.token) {
+export function addBearerTokenExpiredListener(listener: () => void) {
+  return addAuthenticationExceptionListener(listener)
+}
+
+function hasSessionCredential(auth?: RequestAuth) {
+  if (!auth) {
+    return false
+  }
+
+  if (auth.mode === 'basic') {
+    return Boolean(auth.username || auth.password)
+  }
+
+  return Boolean(auth.token)
+}
+
+function notifyAuthenticationException(status: number, auth?: RequestAuth) {
+  if (status !== 401 || auth?.suppressAuthenticationException || !hasSessionCredential(auth)) {
     return
   }
 
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new Event(bearerTokenExpiredEventName))
+    window.dispatchEvent(
+      new CustomEvent<AuthenticationExceptionEvent>(authenticationExceptionEventName, {
+        detail: {
+          status,
+          message:
+            'Your session has expired or your credentials are no longer valid. Sign in again to continue.',
+        },
+      }),
+    )
   }
 }
 
@@ -654,7 +1123,7 @@ function parseFilenameFromContentDisposition(value: string | null) {
 }
 
 function buildApiError(status: number, payload?: ApiErrorPayload | null, auth?: RequestAuth) {
-  notifyBearerTokenExpired(status, auth)
+  notifyAuthenticationException(status, auth)
 
   return new ApiError(
     status,
@@ -713,6 +1182,150 @@ function withPath(path: string, options?: { verbose?: number }) {
   return `?${params.toString()}`
 }
 
+function userListParams(options?: UserListOptions) {
+  const params = new URLSearchParams()
+  const zone = options?.zone?.trim()
+  const prefix = options?.prefix?.trim()
+
+  if (zone) {
+    params.set('zone', zone)
+  }
+
+  if (options?.type) {
+    params.set('type', options.type)
+  }
+
+  if (prefix) {
+    params.set('prefix', prefix)
+  }
+
+  return params
+}
+
+function userGroupListParams(options?: UserGroupListOptions) {
+  const params = new URLSearchParams()
+  const zone = options?.zone?.trim()
+  const prefix = options?.prefix?.trim()
+
+  if (zone) {
+    params.set('zone', zone)
+  }
+
+  if (prefix) {
+    params.set('prefix', prefix)
+  }
+
+  return params
+}
+
+function limitParams(options?: { zone?: string; limit?: number }) {
+  const params = new URLSearchParams()
+  const zone = options?.zone?.trim()
+
+  if (zone) {
+    params.set('zone', zone)
+  }
+
+  if (options?.limit !== undefined) {
+    params.set('limit', `${options.limit}`)
+  }
+
+  return params
+}
+
+function userMembershipSummaryParams(options?: UserMembershipSummaryOptions) {
+  const params = userListParams(options)
+
+  if (options?.limit !== undefined) {
+    params.set('limit', `${options.limit}`)
+  }
+
+  return params
+}
+
+function userGroupSummaryParams(options?: UserGroupSummaryOptions) {
+  const params = userGroupListParams(options)
+
+  if (options?.limit !== undefined) {
+    params.set('limit', `${options.limit}`)
+  }
+
+  return params
+}
+
+function principalSearchParams(query: string, options?: PrincipalSearchOptions) {
+  const params = new URLSearchParams({
+    query: requireNonEmptyValue(query, 'query'),
+  })
+  const zone = options?.zone?.trim()
+
+  if (zone) {
+    params.set('zone', zone)
+  }
+
+  for (const kind of options?.kinds ?? []) {
+    params.append('kind', kind)
+  }
+
+  if (options?.limit !== undefined) {
+    params.set('limit', `${options.limit}`)
+  }
+
+  return params
+}
+
+function avuListParams(options?: AVUListOptions) {
+  const params = new URLSearchParams()
+  const zone = options?.zone?.trim()
+  const attrib = options?.attrib?.trim()
+
+  if (zone) {
+    params.set('zone', zone)
+  }
+
+  if (attrib) {
+    params.set('attrib', attrib)
+  }
+
+  if (options?.sort) {
+    params.set('sort', options.sort)
+  }
+
+  if (options?.order) {
+    params.set('order', options.order)
+  }
+
+  if (options?.limit !== undefined) {
+    params.set('limit', `${options.limit}`)
+  }
+
+  if (options?.offset !== undefined) {
+    params.set('offset', `${options.offset}`)
+  }
+
+  return params
+}
+
+function mutationParams(options?: { zone?: string; reconcile?: boolean }) {
+  const params = new URLSearchParams()
+  const zone = options?.zone?.trim()
+
+  if (zone) {
+    params.set('zone', zone)
+  }
+
+  if (options?.reconcile !== undefined) {
+    params.set('reconcile', `${options.reconcile}`)
+  }
+
+  return params
+}
+
+function withOptionalParams(path: string, params: URLSearchParams) {
+  const queryString = params.toString()
+  return queryString ? `${path}?${queryString}` : path
+}
+
 export function getHealth(baseUrl?: string) {
   return request<HealthResponse>('/healthz', { baseUrl })
 }
@@ -739,25 +1352,556 @@ export function getResources(
   })
 }
 
+export function getUsers(auth: RequestAuth, baseUrl?: string, options?: UserListOptions) {
+  return request<UserCollectionResponse>(
+    withOptionalParams('/api/v1/user', userListParams(options)),
+    {
+      auth,
+      baseUrl,
+    },
+  )
+}
+
 export function searchUsers(
   prefix: string,
   auth: RequestAuth,
   baseUrl?: string,
   options?: { zone?: string },
 ) {
-  const params = new URLSearchParams({
+  return getUsers(auth, baseUrl, {
+    ...options,
     prefix,
   })
+}
 
-  const zone = options?.zone?.trim()
-  if (zone) {
-    params.set('zone', zone)
-  }
+export function getCurrentUserMembership(
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: CurrentUserMembershipOptions,
+) {
+  return request<CurrentUserMembershipResponse>(
+    withOptionalParams('/api/v1/user/me', limitParams(options)),
+    {
+      auth,
+      baseUrl,
+    },
+  )
+}
 
-  return request<UserLookupResponse>(`/api/v1/user?${params.toString()}`, {
+export function getUserMembershipSummaries(
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: UserMembershipSummaryOptions,
+) {
+  return request<UserMembershipSummaryCollectionResponse>(
+    withOptionalParams('/api/v1/user/membership-summary', userMembershipSummaryParams(options)),
+    {
+      auth,
+      baseUrl,
+    },
+  )
+}
+
+export function searchPrincipals(
+  query: string,
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: PrincipalSearchOptions,
+) {
+  return request<PrincipalSearchResponse>(
+    `/api/v1/principal?${principalSearchParams(query, options).toString()}`,
+    {
+      auth,
+      baseUrl,
+    },
+  )
+}
+
+export function createUser(
+  payload: UserCreateRequest,
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: UserMutationOptions,
+) {
+  return request<UserResponse>(withOptionalParams('/api/v1/user', mutationParams(options)), {
     auth,
     baseUrl,
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      name: requireNonEmptyValue(payload.name, 'name'),
+      type: payload.type,
+      password: payload.password,
+    }),
   })
+}
+
+export function getUser(
+  userName: string,
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: { zone?: string },
+) {
+  const normalizedUserName = requireNonEmptyValue(userName, 'user_name')
+  const params = mutationParams(options)
+
+  return request<UserResponse>(
+    withOptionalParams(`/api/v1/user/${encodeURIComponent(normalizedUserName)}`, params),
+    {
+      auth,
+      baseUrl,
+    },
+  )
+}
+
+export function getUserGroupsForUser(
+  userName: string,
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: UserGroupsForUserOptions,
+) {
+  const normalizedUserName = requireNonEmptyValue(userName, 'user_name')
+
+  return request<UserGroupRefCollectionResponse>(
+    withOptionalParams(
+      `/api/v1/user/${encodeURIComponent(normalizedUserName)}/usergroup`,
+      limitParams(options),
+    ),
+    {
+      auth,
+      baseUrl,
+    },
+  )
+}
+
+export function getUserAVUs(
+  userName: string,
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: AVUListOptions,
+) {
+  const normalizedUserName = requireNonEmptyValue(userName, 'user_name')
+
+  return request<UserAVUResponse>(
+    withOptionalParams(
+      `/api/v1/user/${encodeURIComponent(normalizedUserName)}/avu`,
+      avuListParams(options),
+    ),
+    {
+      auth,
+      baseUrl,
+    },
+  )
+}
+
+export function addUserAVU(
+  userName: string,
+  payload: { attrib: string; value: string; unit?: string },
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: AVUMutationOptions,
+) {
+  const normalizedUserName = requireNonEmptyValue(userName, 'user_name')
+  const requestPayload = normalizeAVUPayload(payload)
+
+  return request<UserAVUSingleResponse>(
+    withOptionalParams(
+      `/api/v1/user/${encodeURIComponent(normalizedUserName)}/avu`,
+      mutationParams(options),
+    ),
+    {
+      auth,
+      baseUrl,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestPayload),
+    },
+  )
+}
+
+export function updateUserAVU(
+  userName: string,
+  avuId: string,
+  payload: { attrib: string; value: string; unit?: string },
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: AVUMutationOptions,
+) {
+  const normalizedUserName = requireNonEmptyValue(userName, 'user_name')
+  const normalizedAVUId = requireNonEmptyValue(avuId, 'avu_id')
+  const requestPayload = normalizeAVUPayload(payload)
+
+  return request<UserAVUSingleResponse>(
+    withOptionalParams(
+      `/api/v1/user/${encodeURIComponent(normalizedUserName)}/avu/${encodeURIComponent(normalizedAVUId)}`,
+      mutationParams(options),
+    ),
+    {
+      auth,
+      baseUrl,
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestPayload),
+    },
+  )
+}
+
+export async function deleteUserAVU(
+  userName: string,
+  avuId: string,
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: AVUMutationOptions,
+) {
+  const normalizedUserName = requireNonEmptyValue(userName, 'user_name')
+  const normalizedAVUId = requireNonEmptyValue(avuId, 'avu_id')
+  const path = withOptionalParams(
+    `/api/v1/user/${encodeURIComponent(normalizedUserName)}/avu/${encodeURIComponent(normalizedAVUId)}`,
+    mutationParams(options),
+  )
+  const response = await fetch(buildUrl(path, baseUrl), {
+    method: 'DELETE',
+    headers: buildHeaders(auth),
+  })
+
+  if (!response.ok) {
+    let payload: ApiErrorPayload | null = null
+
+    try {
+      payload = (await response.json()) as ApiErrorPayload
+    } catch {
+      // Fall back to the HTTP status when the response body is not JSON.
+    }
+
+    throw buildApiError(response.status, payload, auth)
+  }
+}
+
+export function updateUser(
+  userName: string,
+  payload: UserUpdateRequest,
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: UserMutationOptions,
+) {
+  const normalizedUserName = requireNonEmptyValue(userName, 'user_name')
+
+  return request<UserResponse>(
+    withOptionalParams(
+      `/api/v1/user/${encodeURIComponent(normalizedUserName)}`,
+      mutationParams(options),
+    ),
+    {
+      auth,
+      baseUrl,
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        type: payload.type,
+        password: payload.password,
+      }),
+    },
+  )
+}
+
+export async function deleteUser(
+  userName: string,
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: UserMutationOptions,
+) {
+  const normalizedUserName = requireNonEmptyValue(userName, 'user_name')
+  const path = withOptionalParams(
+    `/api/v1/user/${encodeURIComponent(normalizedUserName)}`,
+    mutationParams(options),
+  )
+  const response = await fetch(buildUrl(path, baseUrl), {
+    method: 'DELETE',
+    headers: buildHeaders(auth),
+  })
+
+  if (!response.ok) {
+    let payload: ApiErrorPayload | null = null
+
+    try {
+      payload = (await response.json()) as ApiErrorPayload
+    } catch {
+      // Fall back to the HTTP status when the response body is not JSON.
+    }
+
+    throw buildApiError(response.status, payload, auth)
+  }
+}
+
+export function getUserGroups(
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: UserGroupListOptions,
+) {
+  return request<UserGroupCollectionResponse>(
+    withOptionalParams('/api/v1/usergroup', userGroupListParams(options)),
+    {
+      auth,
+      baseUrl,
+    },
+  )
+}
+
+export function getUserGroupSummaries(
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: UserGroupSummaryOptions,
+) {
+  return request<UserGroupSummaryCollectionResponse>(
+    withOptionalParams('/api/v1/usergroup/summary', userGroupSummaryParams(options)),
+    {
+      auth,
+      baseUrl,
+    },
+  )
+}
+
+export function createUserGroup(
+  payload: UserGroupCreateRequest,
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: UserGroupMutationOptions,
+) {
+  return request<UserGroupResponse>(
+    withOptionalParams('/api/v1/usergroup', mutationParams(options)),
+    {
+      auth,
+      baseUrl,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: requireNonEmptyValue(payload.name, 'name'),
+      }),
+    },
+  )
+}
+
+export function getUserGroup(
+  groupName: string,
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: { zone?: string },
+) {
+  const normalizedGroupName = requireNonEmptyValue(groupName, 'group_name')
+  const params = mutationParams(options)
+
+  return request<UserGroupResponse>(
+    withOptionalParams(`/api/v1/usergroup/${encodeURIComponent(normalizedGroupName)}`, params),
+    {
+      auth,
+      baseUrl,
+    },
+  )
+}
+
+export function getUserGroupAVUs(
+  groupName: string,
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: AVUListOptions,
+) {
+  const normalizedGroupName = requireNonEmptyValue(groupName, 'group_name')
+
+  return request<UserGroupAVUResponse>(
+    withOptionalParams(
+      `/api/v1/usergroup/${encodeURIComponent(normalizedGroupName)}/avu`,
+      avuListParams(options),
+    ),
+    {
+      auth,
+      baseUrl,
+    },
+  )
+}
+
+export function addUserGroupAVU(
+  groupName: string,
+  payload: { attrib: string; value: string; unit?: string },
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: AVUMutationOptions,
+) {
+  const normalizedGroupName = requireNonEmptyValue(groupName, 'group_name')
+  const requestPayload = normalizeAVUPayload(payload)
+
+  return request<UserGroupAVUSingleResponse>(
+    withOptionalParams(
+      `/api/v1/usergroup/${encodeURIComponent(normalizedGroupName)}/avu`,
+      mutationParams(options),
+    ),
+    {
+      auth,
+      baseUrl,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestPayload),
+    },
+  )
+}
+
+export function updateUserGroupAVU(
+  groupName: string,
+  avuId: string,
+  payload: { attrib: string; value: string; unit?: string },
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: AVUMutationOptions,
+) {
+  const normalizedGroupName = requireNonEmptyValue(groupName, 'group_name')
+  const normalizedAVUId = requireNonEmptyValue(avuId, 'avu_id')
+  const requestPayload = normalizeAVUPayload(payload)
+
+  return request<UserGroupAVUSingleResponse>(
+    withOptionalParams(
+      `/api/v1/usergroup/${encodeURIComponent(normalizedGroupName)}/avu/${encodeURIComponent(normalizedAVUId)}`,
+      mutationParams(options),
+    ),
+    {
+      auth,
+      baseUrl,
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestPayload),
+    },
+  )
+}
+
+export async function deleteUserGroupAVU(
+  groupName: string,
+  avuId: string,
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: AVUMutationOptions,
+) {
+  const normalizedGroupName = requireNonEmptyValue(groupName, 'group_name')
+  const normalizedAVUId = requireNonEmptyValue(avuId, 'avu_id')
+  const path = withOptionalParams(
+    `/api/v1/usergroup/${encodeURIComponent(normalizedGroupName)}/avu/${encodeURIComponent(normalizedAVUId)}`,
+    mutationParams(options),
+  )
+  const response = await fetch(buildUrl(path, baseUrl), {
+    method: 'DELETE',
+    headers: buildHeaders(auth),
+  })
+
+  if (!response.ok) {
+    let payload: ApiErrorPayload | null = null
+
+    try {
+      payload = (await response.json()) as ApiErrorPayload
+    } catch {
+      // Fall back to the HTTP status when the response body is not JSON.
+    }
+
+    throw buildApiError(response.status, payload, auth)
+  }
+}
+
+export async function deleteUserGroup(
+  groupName: string,
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: UserGroupMutationOptions,
+) {
+  const normalizedGroupName = requireNonEmptyValue(groupName, 'group_name')
+  const path = withOptionalParams(
+    `/api/v1/usergroup/${encodeURIComponent(normalizedGroupName)}`,
+    mutationParams(options),
+  )
+  const response = await fetch(buildUrl(path, baseUrl), {
+    method: 'DELETE',
+    headers: buildHeaders(auth),
+  })
+
+  if (!response.ok) {
+    let payload: ApiErrorPayload | null = null
+
+    try {
+      payload = (await response.json()) as ApiErrorPayload
+    } catch {
+      // Fall back to the HTTP status when the response body is not JSON.
+    }
+
+    throw buildApiError(response.status, payload, auth)
+  }
+}
+
+export function addUserGroupMember(
+  groupName: string,
+  payload: UserGroupMemberRequest,
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: UserGroupMutationOptions,
+) {
+  const normalizedGroupName = requireNonEmptyValue(groupName, 'group_name')
+
+  return request<UserGroupResponse>(
+    withOptionalParams(
+      `/api/v1/usergroup/${encodeURIComponent(normalizedGroupName)}/member`,
+      mutationParams(options),
+    ),
+    {
+      auth,
+      baseUrl,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        user_name: requireNonEmptyValue(payload.user_name, 'user_name'),
+      }),
+    },
+  )
+}
+
+export async function removeUserGroupMember(
+  groupName: string,
+  userName: string,
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: UserGroupMutationOptions,
+) {
+  const normalizedGroupName = requireNonEmptyValue(groupName, 'group_name')
+  const normalizedUserName = requireNonEmptyValue(userName, 'user_name')
+  const path = withOptionalParams(
+    `/api/v1/usergroup/${encodeURIComponent(normalizedGroupName)}/member/${encodeURIComponent(normalizedUserName)}`,
+    mutationParams(options),
+  )
+  const response = await fetch(buildUrl(path, baseUrl), {
+    method: 'DELETE',
+    headers: buildHeaders(auth),
+  })
+
+  if (!response.ok) {
+    let payload: ApiErrorPayload | null = null
+
+    try {
+      payload = (await response.json()) as ApiErrorPayload
+    } catch {
+      // Fall back to the HTTP status when the response body is not JSON.
+    }
+
+    throw buildApiError(response.status, payload, auth)
+  }
 }
 
 export function searchGroups(
@@ -766,18 +1910,9 @@ export function searchGroups(
   baseUrl?: string,
   options?: { zone?: string },
 ) {
-  const params = new URLSearchParams({
+  return getUserGroups(auth, baseUrl, {
+    ...options,
     prefix,
-  })
-
-  const zone = options?.zone?.trim()
-  if (zone) {
-    params.set('zone', zone)
-  }
-
-  return request<GroupLookupResponse>(`/api/v1/usergroup?${params.toString()}`, {
-    auth,
-    baseUrl,
   })
 }
 
@@ -1086,7 +2221,7 @@ export async function removeFavorite(
       }
     }
 
-    notifyBearerTokenExpired(response.status, auth)
+    notifyAuthenticationException(response.status, auth)
     throw new ApiError(
       response.status,
       payloadError?.message ?? fallbackMessage ?? `Request failed with status ${response.status}`,
@@ -1860,7 +2995,7 @@ export async function deleteTicket(action: ActionLink, auth: RequestAuth, baseUr
       // Fall back to the HTTP status when the response body is not JSON.
     }
 
-    notifyBearerTokenExpired(response.status, auth)
+    notifyAuthenticationException(response.status, auth)
     throw new ApiError(
       response.status,
       payload?.message ?? `Request failed with status ${response.status}`,
