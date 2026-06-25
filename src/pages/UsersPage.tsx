@@ -19,6 +19,7 @@ import {
   Title,
   Autocomplete,
 } from '@mantine/core'
+import { notifications } from '@mantine/notifications'
 import {
   useMutation,
   useQuery,
@@ -27,6 +28,7 @@ import {
 } from '@tanstack/react-query'
 import {
   IconAlertCircle,
+  IconDatabase,
   IconEdit,
   IconListDetails,
   IconPlus,
@@ -35,12 +37,23 @@ import {
   IconUsersGroup,
 } from '@tabler/icons-react'
 import {
+  AVUMetadataTable,
+  type AVUFormState,
+  type AVURow,
+} from '../features/avu-metadata'
+import {
   ApiError,
+  addUserAVU,
+  addUserGroupAVU,
   addUserGroupMember,
   createUser,
   createUserGroup,
   deleteUser,
+  deleteUserAVU,
+  deleteUserGroupAVU,
   deleteUserGroup,
+  getUserAVUs,
+  getUserGroupAVUs,
   getUserGroup,
   getUserGroupSummaries,
   getUserMembershipSummaries,
@@ -52,6 +65,10 @@ import {
   searchUsers,
   updateUserPassword,
   updateUserType,
+  updateUserAVU,
+  updateUserGroupAVU,
+  userAVUCacheKey,
+  userGroupAVUCacheKey,
   userGroupDetailCacheKey,
   userGroupSummaryCacheKey,
   userMembershipSummaryCacheKey,
@@ -158,6 +175,14 @@ function formatPrincipalName(userName: string, userZone: string, groupZone?: str
     : userName
 }
 
+function emptyAVUForm(): AVUFormState {
+  return {
+    attrib: '',
+    value: '',
+    unit: '',
+  }
+}
+
 export function UsersPage() {
   const { connection, currentUserMembership } = useSession()
   const queryClient = useQueryClient()
@@ -180,6 +205,13 @@ export function UsersPage() {
   const [deletingGroup, setDeletingGroup] = useState<UserGroupSummary | null>(null)
   const [removingMember, setRemovingMember] = useState<UserGroupMember | null>(null)
   const [memberName, setMemberName] = useState('')
+  const [metadataUser, setMetadataUser] = useState<UserMembershipSummary | null>(null)
+  const [isAddingUserAVU, setIsAddingUserAVU] = useState(false)
+  const [editingUserAVU, setEditingUserAVU] = useState<AVURow | null>(null)
+  const [userAVUForm, setUserAVUForm] = useState<AVUFormState>(emptyAVUForm)
+  const [isAddingGroupAVU, setIsAddingGroupAVU] = useState(false)
+  const [editingGroupAVU, setEditingGroupAVU] = useState<AVURow | null>(null)
+  const [groupAVUForm, setGroupAVUForm] = useState<AVUFormState>(emptyAVUForm)
   const currentUser = currentUserMembership?.current_user.user
   const isCurrentRodsadmin = Boolean(currentUserMembership?.current_user.is_rodsadmin)
   const isCurrentGroupadmin = Boolean(currentUserMembership?.current_user.is_groupadmin)
@@ -232,6 +264,42 @@ export function UsersPage() {
       }
 
       return getUserGroup(selectedGroup.name, connection.auth, connection.baseUrl, {
+        zone: selectedGroup.zone,
+      })
+    },
+    enabled: Boolean(selectedGroup),
+  })
+  const userAVUQuery = useQuery({
+    queryKey: userAVUCacheKey(
+      connection.baseUrl,
+      connection.auth.mode,
+      metadataUser?.name ?? '',
+      { zone: metadataUser?.zone },
+    ),
+    queryFn: () => {
+      if (!metadataUser) {
+        throw new ApiError(400, 'Select a user.')
+      }
+
+      return getUserAVUs(metadataUser.name, connection.auth, connection.baseUrl, {
+        zone: metadataUser.zone,
+      })
+    },
+    enabled: Boolean(metadataUser),
+  })
+  const groupAVUQuery = useQuery({
+    queryKey: userGroupAVUCacheKey(
+      connection.baseUrl,
+      connection.auth.mode,
+      selectedGroup?.name ?? '',
+      { zone: selectedGroup?.zone },
+    ),
+    queryFn: () => {
+      if (!selectedGroup) {
+        throw new ApiError(400, 'Select a group.')
+      }
+
+      return getUserGroupAVUs(selectedGroup.name, connection.auth, connection.baseUrl, {
         zone: selectedGroup.zone,
       })
     },
@@ -291,6 +359,12 @@ export function UsersPage() {
       queryClient.invalidateQueries({ queryKey: ['user-membership-summary'] }),
       queryClient.invalidateQueries({ queryKey: ['user-groups-for-user'] }),
     ])
+  }
+  const invalidateUserAVUQueries = async () => {
+    await queryClient.invalidateQueries({ queryKey: ['user-avus'] })
+  }
+  const invalidateGroupAVUQueries = async () => {
+    await queryClient.invalidateQueries({ queryKey: ['user-group-avus'] })
   }
   const createUserMutation = useMutation({
     mutationFn: () =>
@@ -480,6 +554,248 @@ export function UsersPage() {
       setRemovingMember(null)
     },
   })
+  const addUserAVUMutation = useMutation({
+    mutationFn: () => {
+      if (!metadataUser) {
+        throw new ApiError(400, 'Select a user.')
+      }
+
+      if (!isCurrentRodsadmin) {
+        throw new ApiError(403, 'Only rodsadmin users can create user AVUs.')
+      }
+
+      if (!userAVUQuery.data?.links?.create) {
+        throw new ApiError(403, 'This iRODS session is not allowed to create user AVUs.')
+      }
+
+      return addUserAVU(
+        metadataUser.name,
+        {
+          attrib: userAVUForm.attrib.trim(),
+          value: userAVUForm.value.trim(),
+          unit: userAVUForm.unit.trim(),
+        },
+        connection.auth,
+        connection.baseUrl,
+        {
+          zone: metadataUser.zone,
+        },
+      )
+    },
+    onSuccess: async () => {
+      notifications.show({
+        title: 'AVU added',
+        message: 'User metadata entry created.',
+        color: 'teal',
+      })
+      setIsAddingUserAVU(false)
+      setUserAVUForm(emptyAVUForm())
+      await invalidateUserAVUQueries()
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'AVU add failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+  const updateUserAVUMutation = useMutation({
+    mutationFn: () => {
+      if (!metadataUser || !editingUserAVU) {
+        throw new ApiError(400, 'Select a user AVU.')
+      }
+
+      if (!isCurrentRodsadmin) {
+        throw new ApiError(403, 'Only rodsadmin users can update user AVUs.')
+      }
+
+      if (!editingUserAVU.links?.update) {
+        throw new ApiError(403, 'This iRODS session is not allowed to update this user AVU.')
+      }
+
+      return updateUserAVU(
+        metadataUser.name,
+        editingUserAVU.id,
+        {
+          attrib: userAVUForm.attrib.trim(),
+          value: userAVUForm.value.trim(),
+          unit: userAVUForm.unit.trim(),
+        },
+        connection.auth,
+        connection.baseUrl,
+        {
+          zone: metadataUser.zone,
+        },
+      )
+    },
+    onSuccess: async () => {
+      notifications.show({
+        title: 'AVU updated',
+        message: 'User metadata entry replaced.',
+        color: 'teal',
+      })
+      setEditingUserAVU(null)
+      setUserAVUForm(emptyAVUForm())
+      await invalidateUserAVUQueries()
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'AVU update failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+  const deleteUserAVUMutation = useMutation({
+    mutationFn: (avu: AVURow) => {
+      if (!metadataUser) {
+        throw new ApiError(400, 'Select a user.')
+      }
+
+      if (!isCurrentRodsadmin) {
+        throw new ApiError(403, 'Only rodsadmin users can delete user AVUs.')
+      }
+
+      if (!avu.links?.delete) {
+        throw new ApiError(403, 'This iRODS session is not allowed to delete this user AVU.')
+      }
+
+      return deleteUserAVU(metadataUser.name, avu.id, connection.auth, connection.baseUrl, {
+        zone: metadataUser.zone,
+      })
+    },
+    onSuccess: async () => {
+      notifications.show({
+        title: 'AVU deleted',
+        message: 'User metadata entry removed.',
+        color: 'teal',
+      })
+      await invalidateUserAVUQueries()
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'AVU delete failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+  const addGroupAVUMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedGroup) {
+        throw new ApiError(400, 'Select a group.')
+      }
+
+      if (!groupAVUQuery.data?.links?.create) {
+        throw new ApiError(403, 'This iRODS session is not allowed to create group AVUs.')
+      }
+
+      return addUserGroupAVU(
+        selectedGroup.name,
+        {
+          attrib: groupAVUForm.attrib.trim(),
+          value: groupAVUForm.value.trim(),
+          unit: groupAVUForm.unit.trim(),
+        },
+        connection.auth,
+        connection.baseUrl,
+        {
+          zone: selectedGroup.zone,
+        },
+      )
+    },
+    onSuccess: async () => {
+      notifications.show({
+        title: 'AVU added',
+        message: 'Group metadata entry created.',
+        color: 'teal',
+      })
+      setIsAddingGroupAVU(false)
+      setGroupAVUForm(emptyAVUForm())
+      await invalidateGroupAVUQueries()
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'AVU add failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+  const updateGroupAVUMutation = useMutation({
+    mutationFn: () => {
+      if (!selectedGroup || !editingGroupAVU) {
+        throw new ApiError(400, 'Select a group AVU.')
+      }
+
+      if (!editingGroupAVU.links?.update) {
+        throw new ApiError(403, 'This iRODS session is not allowed to update this group AVU.')
+      }
+
+      return updateUserGroupAVU(
+        selectedGroup.name,
+        editingGroupAVU.id,
+        {
+          attrib: groupAVUForm.attrib.trim(),
+          value: groupAVUForm.value.trim(),
+          unit: groupAVUForm.unit.trim(),
+        },
+        connection.auth,
+        connection.baseUrl,
+        {
+          zone: selectedGroup.zone,
+        },
+      )
+    },
+    onSuccess: async () => {
+      notifications.show({
+        title: 'AVU updated',
+        message: 'Group metadata entry replaced.',
+        color: 'teal',
+      })
+      setEditingGroupAVU(null)
+      setGroupAVUForm(emptyAVUForm())
+      await invalidateGroupAVUQueries()
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'AVU update failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
+  const deleteGroupAVUMutation = useMutation({
+    mutationFn: (avu: AVURow) => {
+      if (!selectedGroup) {
+        throw new ApiError(400, 'Select a group.')
+      }
+
+      if (!avu.links?.delete) {
+        throw new ApiError(403, 'This iRODS session is not allowed to delete this group AVU.')
+      }
+
+      return deleteUserGroupAVU(selectedGroup.name, avu.id, connection.auth, connection.baseUrl, {
+        zone: selectedGroup.zone,
+      })
+    },
+    onSuccess: async () => {
+      notifications.show({
+        title: 'AVU deleted',
+        message: 'Group metadata entry removed.',
+        color: 'teal',
+      })
+      await invalidateGroupAVUQueries()
+    },
+    onError: (error: Error) => {
+      notifications.show({
+        title: 'AVU delete failed',
+        message: error.message,
+        color: 'red',
+      })
+    },
+  })
   const openEditUser = (user: UserMembershipSummary) => {
     updateUserMutation.reset()
     setEditingUser(user)
@@ -496,11 +812,38 @@ export function UsersPage() {
     deleteUserMutation.reset()
     setDeletingUser(user)
   }
+  const openUserMetadata = (user: UserMembershipSummary) => {
+    setMetadataUser(user)
+    setIsAddingUserAVU(false)
+    setEditingUserAVU(null)
+    setUserAVUForm(emptyAVUForm())
+    addUserAVUMutation.reset()
+    updateUserAVUMutation.reset()
+    deleteUserAVUMutation.reset()
+  }
+  const closeUserMetadata = () => {
+    setMetadataUser(null)
+    setIsAddingUserAVU(false)
+    setEditingUserAVU(null)
+    setUserAVUForm(emptyAVUForm())
+  }
   const openGroupDetails = (group: UserGroupSummary) => {
     setSelectedGroup(group)
     setMemberName('')
+    setIsAddingGroupAVU(false)
+    setEditingGroupAVU(null)
+    setGroupAVUForm(emptyAVUForm())
     addMemberMutation.reset()
     removeMemberMutation.reset()
+    addGroupAVUMutation.reset()
+    updateGroupAVUMutation.reset()
+    deleteGroupAVUMutation.reset()
+  }
+  const closeGroupDetails = () => {
+    setSelectedGroup(null)
+    setIsAddingGroupAVU(false)
+    setEditingGroupAVU(null)
+    setGroupAVUForm(emptyAVUForm())
   }
   const openDeleteGroup = (group: UserGroupSummary) => {
     deleteGroupMutation.reset()
@@ -514,6 +857,113 @@ export function UsersPage() {
     memberSearchQuery.data?.users.map((user) =>
       user.zone === selectedGroup?.zone ? user.name : `${user.name}#${user.zone}`,
     ) ?? []
+
+  const validateAVUForm = (form: AVUFormState) => {
+    if (form.attrib.trim() && form.value.trim()) {
+      return true
+    }
+
+    notifications.show({
+      title: 'AVU is incomplete',
+      message: 'Attribute and value are required.',
+      color: 'red',
+    })
+    return false
+  }
+  const beginUserAVUAdd = () => {
+    if (!isCurrentRodsadmin || !userAVUQuery.data?.links?.create) {
+      return
+    }
+
+    setEditingUserAVU(null)
+    setIsAddingUserAVU(true)
+    setUserAVUForm(emptyAVUForm())
+  }
+  const beginUserAVUEdit = (avu: AVURow) => {
+    if (!isCurrentRodsadmin || !avu.links?.update) {
+      return
+    }
+
+    setIsAddingUserAVU(false)
+    setEditingUserAVU(avu)
+    setUserAVUForm({
+      attrib: avu.attrib,
+      value: avu.value,
+      unit: avu.unit ?? '',
+    })
+  }
+  const cancelUserAVUEditor = () => {
+    setIsAddingUserAVU(false)
+    setEditingUserAVU(null)
+    setUserAVUForm(emptyAVUForm())
+  }
+  const submitUserAVUAdd = () => {
+    if (validateAVUForm(userAVUForm)) {
+      addUserAVUMutation.mutate()
+    }
+  }
+  const submitUserAVUUpdate = () => {
+    if (validateAVUForm(userAVUForm)) {
+      updateUserAVUMutation.mutate()
+    }
+  }
+  const beginUserAVUDelete = (avu: AVURow) => {
+    if (!isCurrentRodsadmin || !avu.links?.delete) {
+      return
+    }
+
+    const confirmed = window.confirm(`Delete AVU "${avu.attrib}" with value "${avu.value}"?`)
+    if (confirmed) {
+      deleteUserAVUMutation.mutate(avu)
+    }
+  }
+  const beginGroupAVUAdd = () => {
+    if (!groupAVUQuery.data?.links?.create) {
+      return
+    }
+
+    setEditingGroupAVU(null)
+    setIsAddingGroupAVU(true)
+    setGroupAVUForm(emptyAVUForm())
+  }
+  const beginGroupAVUEdit = (avu: AVURow) => {
+    if (!avu.links?.update) {
+      return
+    }
+
+    setIsAddingGroupAVU(false)
+    setEditingGroupAVU(avu)
+    setGroupAVUForm({
+      attrib: avu.attrib,
+      value: avu.value,
+      unit: avu.unit ?? '',
+    })
+  }
+  const cancelGroupAVUEditor = () => {
+    setIsAddingGroupAVU(false)
+    setEditingGroupAVU(null)
+    setGroupAVUForm(emptyAVUForm())
+  }
+  const submitGroupAVUAdd = () => {
+    if (validateAVUForm(groupAVUForm)) {
+      addGroupAVUMutation.mutate()
+    }
+  }
+  const submitGroupAVUUpdate = () => {
+    if (validateAVUForm(groupAVUForm)) {
+      updateGroupAVUMutation.mutate()
+    }
+  }
+  const beginGroupAVUDelete = (avu: AVURow) => {
+    if (!avu.links?.delete) {
+      return
+    }
+
+    const confirmed = window.confirm(`Delete AVU "${avu.attrib}" with value "${avu.value}"?`)
+    if (confirmed) {
+      deleteGroupAVUMutation.mutate(avu)
+    }
+  }
 
   return (
     <Stack gap="lg">
@@ -645,6 +1095,82 @@ export function UsersPage() {
       </Modal>
 
       <Modal
+        opened={Boolean(metadataUser)}
+        onClose={closeUserMetadata}
+        title={metadataUser ? `Metadata for ${metadataUser.name}` : 'User metadata'}
+        centered
+        size="lg"
+      >
+        <Stack gap="md">
+          {metadataUser ? (
+            <Group gap="xs">
+              <Badge variant="light" color="blue">
+                {metadataUser.type}
+              </Badge>
+              <Badge variant="light" color="gray">
+                {metadataUser.zone}
+              </Badge>
+            </Group>
+          ) : null}
+
+          <Group gap="xs" justify="space-between">
+            <Group gap="xs">
+              <ThemeIcon variant="light" color="orange" size="md">
+                <IconDatabase size={14} />
+              </ThemeIcon>
+              <Title order={4}>AVU Metadata</Title>
+            </Group>
+            {isCurrentRodsadmin && userAVUQuery.data?.links?.create ? (
+              <Button
+                size="xs"
+                variant="light"
+                leftSection={<IconPlus size={14} />}
+                loading={addUserAVUMutation.isPending}
+                onClick={beginUserAVUAdd}
+                disabled={isAddingUserAVU}
+              >
+                Add AVU
+              </Button>
+            ) : null}
+          </Group>
+
+          {userAVUQuery.isError ? (
+            <Alert
+              color={errorColor(userAVUQuery.error)}
+              variant="light"
+              icon={<IconAlertCircle size={18} />}
+              title="Unable to load user AVUs"
+            >
+              {errorMessage(userAVUQuery.error)}
+            </Alert>
+          ) : (
+            <AVUMetadataTable
+              avus={userAVUQuery.data?.avus}
+              canModify={isCurrentRodsadmin}
+              editingAVUId={editingUserAVU?.id}
+              form={userAVUForm}
+              isAdding={isAddingUserAVU}
+              isCreating={addUserAVUMutation.isPending}
+              isLoading={userAVUQuery.isLoading}
+              isSaving={updateUserAVUMutation.isPending}
+              onCancel={cancelUserAVUEditor}
+              onChange={setUserAVUForm}
+              onDelete={beginUserAVUDelete}
+              onEdit={beginUserAVUEdit}
+              onSubmitAdd={submitUserAVUAdd}
+              onSubmitEdit={submitUserAVUUpdate}
+            />
+          )}
+
+          <Group justify="flex-end">
+            <Button variant="default" onClick={closeUserMetadata}>
+              Close
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
         opened={Boolean(deletingUser)}
         onClose={() => {
           if (!deleteUserMutation.isPending) {
@@ -732,7 +1258,7 @@ export function UsersPage() {
 
       <Modal
         opened={Boolean(selectedGroup)}
-        onClose={() => setSelectedGroup(null)}
+        onClose={closeGroupDetails}
         title={selectedGroup ? selectedGroup.name : 'Group details'}
         centered
         size="lg"
@@ -786,74 +1312,137 @@ export function UsersPage() {
                 </Badge>
               </Group>
 
-              {canManageSelectedGroupMembers ? (
-                <Group align="flex-end">
-                  <Autocomplete
-                    label="Add member"
-                    placeholder="Username or username#zone"
-                    value={addMemberName}
-                    data={memberOptions}
-                    disabled={groupadminNeedsSelfMembership}
-                    onChange={setMemberName}
-                  />
-                  <Button
-                    leftSection={<IconPlus size={16} />}
-                    loading={addMemberMutation.isPending}
-                    disabled={!addMemberName.trim()}
-                    onClick={() => addMemberMutation.mutate()}
-                  >
-                    Add
-                  </Button>
-                </Group>
-              ) : null}
+              <Tabs defaultValue="members">
+                <Tabs.List>
+                  <Tabs.Tab value="members">Members</Tabs.Tab>
+                  <Tabs.Tab value="avus">AVUs</Tabs.Tab>
+                </Tabs.List>
 
-              <Table highlightOnHover verticalSpacing="sm">
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th>Member</Table.Th>
-                    <Table.Th>Type</Table.Th>
-                    <Table.Th>Zone</Table.Th>
-                    {canManageSelectedGroupMembers ? <Table.Th>Actions</Table.Th> : null}
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {(selectedGroupQuery.data.group.members ?? []).length === 0 ? (
-                    <Table.Tr>
-                      <Table.Td colSpan={canManageSelectedGroupMembers ? 4 : 3}>
-                        <Text size="sm" c="dimmed">
-                          No members returned.
-                        </Text>
-                      </Table.Td>
-                    </Table.Tr>
-                  ) : (
-                    (selectedGroupQuery.data.group.members ?? []).map((member) => (
-                      <Table.Tr key={`${member.zone}:${member.name}`}>
-                        <Table.Td>{member.name}</Table.Td>
-                        <Table.Td>{member.type}</Table.Td>
-                        <Table.Td>{member.zone}</Table.Td>
-                        {canManageSelectedGroupMembers ? (
-                          <Table.Td>
-                            <ActionIcon
-                              variant="subtle"
-                              color="red"
-                              aria-label={`Remove ${member.name} from ${selectedGroup?.name}`}
-                              disabled={removeMemberMutation.isPending}
-                              onClick={() => openRemoveMember(member)}
-                            >
-                              <IconTrash size={16} />
-                            </ActionIcon>
-                          </Table.Td>
-                        ) : null}
-                      </Table.Tr>
-                    ))
-                  )}
-                </Table.Tbody>
-              </Table>
+                <Tabs.Panel value="members" pt="md">
+                  <Stack gap="md">
+                    {canManageSelectedGroupMembers ? (
+                      <Group align="flex-end">
+                        <Autocomplete
+                          label="Add member"
+                          placeholder="Username or username#zone"
+                          value={addMemberName}
+                          data={memberOptions}
+                          disabled={groupadminNeedsSelfMembership}
+                          onChange={setMemberName}
+                        />
+                        <Button
+                          leftSection={<IconPlus size={16} />}
+                          loading={addMemberMutation.isPending}
+                          disabled={!addMemberName.trim()}
+                          onClick={() => addMemberMutation.mutate()}
+                        >
+                          Add
+                        </Button>
+                      </Group>
+                    ) : null}
+
+                    <Table highlightOnHover verticalSpacing="sm">
+                      <Table.Thead>
+                        <Table.Tr>
+                          <Table.Th>Member</Table.Th>
+                          <Table.Th>Type</Table.Th>
+                          <Table.Th>Zone</Table.Th>
+                          {canManageSelectedGroupMembers ? <Table.Th>Actions</Table.Th> : null}
+                        </Table.Tr>
+                      </Table.Thead>
+                      <Table.Tbody>
+                        {(selectedGroupQuery.data.group.members ?? []).length === 0 ? (
+                          <Table.Tr>
+                            <Table.Td colSpan={canManageSelectedGroupMembers ? 4 : 3}>
+                              <Text size="sm" c="dimmed">
+                                No members returned.
+                              </Text>
+                            </Table.Td>
+                          </Table.Tr>
+                        ) : (
+                          (selectedGroupQuery.data.group.members ?? []).map((member) => (
+                            <Table.Tr key={`${member.zone}:${member.name}`}>
+                              <Table.Td>{member.name}</Table.Td>
+                              <Table.Td>{member.type}</Table.Td>
+                              <Table.Td>{member.zone}</Table.Td>
+                              {canManageSelectedGroupMembers ? (
+                                <Table.Td>
+                                  <ActionIcon
+                                    variant="subtle"
+                                    color="red"
+                                    aria-label={`Remove ${member.name} from ${selectedGroup?.name}`}
+                                    disabled={removeMemberMutation.isPending}
+                                    onClick={() => openRemoveMember(member)}
+                                  >
+                                    <IconTrash size={16} />
+                                  </ActionIcon>
+                                </Table.Td>
+                              ) : null}
+                            </Table.Tr>
+                          ))
+                        )}
+                      </Table.Tbody>
+                    </Table>
+                  </Stack>
+                </Tabs.Panel>
+
+                <Tabs.Panel value="avus" pt="md">
+                  <Stack gap="md">
+                    <Group gap="xs" justify="space-between">
+                      <Group gap="xs">
+                        <ThemeIcon variant="light" color="orange" size="md">
+                          <IconDatabase size={14} />
+                        </ThemeIcon>
+                        <Title order={4}>AVU Metadata</Title>
+                      </Group>
+                      {groupAVUQuery.data?.links?.create ? (
+                        <Button
+                          size="xs"
+                          variant="light"
+                          leftSection={<IconPlus size={14} />}
+                          loading={addGroupAVUMutation.isPending}
+                          onClick={beginGroupAVUAdd}
+                          disabled={isAddingGroupAVU}
+                        >
+                          Add AVU
+                        </Button>
+                      ) : null}
+                    </Group>
+
+                    {groupAVUQuery.isError ? (
+                      <Alert
+                        color={errorColor(groupAVUQuery.error)}
+                        variant="light"
+                        icon={<IconAlertCircle size={18} />}
+                        title="Unable to load group AVUs"
+                      >
+                        {errorMessage(groupAVUQuery.error)}
+                      </Alert>
+                    ) : (
+                      <AVUMetadataTable
+                        avus={groupAVUQuery.data?.avus}
+                        editingAVUId={editingGroupAVU?.id}
+                        form={groupAVUForm}
+                        isAdding={isAddingGroupAVU}
+                        isCreating={addGroupAVUMutation.isPending}
+                        isLoading={groupAVUQuery.isLoading}
+                        isSaving={updateGroupAVUMutation.isPending}
+                        onCancel={cancelGroupAVUEditor}
+                        onChange={setGroupAVUForm}
+                        onDelete={beginGroupAVUDelete}
+                        onEdit={beginGroupAVUEdit}
+                        onSubmitAdd={submitGroupAVUAdd}
+                        onSubmitEdit={submitGroupAVUUpdate}
+                      />
+                    )}
+                  </Stack>
+                </Tabs.Panel>
+              </Tabs>
             </Stack>
           ) : null}
 
           <Group justify="flex-end">
-            <Button variant="default" onClick={() => setSelectedGroup(null)}>
+            <Button variant="default" onClick={closeGroupDetails}>
               Close
             </Button>
           </Group>
@@ -1022,6 +1611,7 @@ export function UsersPage() {
             <Tabs.Panel value="users" pt="md">
               <UsersTable
                 query={usersQuery}
+                onViewMetadata={openUserMetadata}
                 onEditUser={openEditUser}
                 onDeleteUser={openDeleteUser}
                 canEditUsers={canEditUsers}
@@ -1050,6 +1640,7 @@ export function UsersPage() {
 
 function UsersTable({
   query,
+  onViewMetadata,
   onEditUser,
   onDeleteUser,
   canEditUsers,
@@ -1057,6 +1648,7 @@ function UsersTable({
   actionDisabled,
 }: {
   query: UseQueryResult<Awaited<ReturnType<typeof getUserMembershipSummaries>>, Error>
+  onViewMetadata: (user: UserMembershipSummary) => void
   onEditUser: (user: UserMembershipSummary) => void
   onDeleteUser: (user: UserMembershipSummary) => void
   canEditUsers: boolean
@@ -1143,6 +1735,13 @@ function UsersTable({
               </Table.Td>
               <Table.Td>
                 <Group gap="xs" wrap="nowrap">
+                  <ActionIcon
+                    variant="subtle"
+                    aria-label={`View metadata for ${user.name}`}
+                    onClick={() => onViewMetadata(user)}
+                  >
+                    <IconDatabase size={16} />
+                  </ActionIcon>
                   {canEditUsers ? (
                     <ActionIcon
                       variant="subtle"

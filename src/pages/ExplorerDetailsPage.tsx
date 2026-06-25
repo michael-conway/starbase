@@ -54,6 +54,11 @@ import { FilePreviewGlyph } from '../features/file-preview-icon'
 import { filePreviewSpec } from '../features/file-preview'
 import { displayName, formatDateTime } from '../features/explorer'
 import {
+  AVUMetadataTable,
+  type AVUFormState,
+  type AVURow,
+} from '../features/avu-metadata'
+import {
   addPathACL,
   addFavorite,
   addAVU,
@@ -149,25 +154,6 @@ interface ACLPermissionState {
 
 type ACLPermissionKey = keyof ACLPermissionState
 
-interface AVUFormState {
-  attrib: string
-  value: string
-  unit: string
-}
-
-interface AVURow {
-  id: string
-  attrib: string
-  value: string
-  unit?: string
-  created_at?: string
-  updated_at?: string
-  links?: {
-    update?: ActionLink
-    delete?: ActionLink
-  }
-}
-
 interface ACLPrincipalOption {
   value: string
   label: string
@@ -189,123 +175,6 @@ function avuCreateAction(entry?: Pick<PathEntry, 'links'>): ActionLink | undefin
   }
 
   return action
-}
-
-function avuRows(
-  avus?: AVURow[],
-  options?: {
-    editingAVUId?: string
-    form: AVUFormState
-    isSaving: boolean
-    onCancelEdit: () => void
-    onChange: (form: AVUFormState) => void
-    onDelete: (avu: AVURow) => void
-    onEdit: (avu: AVURow) => void
-    onSubmitEdit: () => void
-  },
-) {
-  if (!avus || avus.length === 0) {
-    return (
-      <Table.Tr>
-        <Table.Td colSpan={4}>
-          <Text c="dimmed" size="sm">
-            No AVUs returned.
-          </Text>
-        </Table.Td>
-      </Table.Tr>
-    )
-  }
-
-  return avus.map((avu) => (
-    <Table.Tr key={`${avu.id}-${avu.attrib}`}>
-      {options?.editingAVUId === avu.id ? (
-        <>
-          <Table.Td>
-            <TextInput
-              placeholder="Attribute"
-              value={options.form.attrib}
-              onChange={(event) =>
-                options.onChange({
-                  ...options.form,
-                  attrib: event.currentTarget.value,
-                })
-              }
-            />
-          </Table.Td>
-          <Table.Td>
-            <TextInput
-              placeholder="Value"
-              value={options.form.value}
-              onChange={(event) =>
-                options.onChange({
-                  ...options.form,
-                  value: event.currentTarget.value,
-                })
-              }
-            />
-          </Table.Td>
-          <Table.Td>
-            <TextInput
-              placeholder="Unit"
-              value={options.form.unit}
-              onChange={(event) =>
-                options.onChange({
-                  ...options.form,
-                  unit: event.currentTarget.value,
-                })
-              }
-            />
-          </Table.Td>
-        </>
-      ) : (
-        <>
-          <Table.Td>
-            <Code>{avu.attrib}</Code>
-          </Table.Td>
-          <Table.Td>{avu.value}</Table.Td>
-          <Table.Td>{avu.unit ?? '—'}</Table.Td>
-        </>
-      )}
-      <Table.Td>
-        <Group gap="xs" wrap="nowrap">
-          {options?.editingAVUId === avu.id ? (
-            <>
-              <Button size="xs" onClick={options.onSubmitEdit} loading={options.isSaving}>
-                Update
-              </Button>
-              <Button size="xs" variant="default" onClick={options.onCancelEdit}>
-                Cancel
-              </Button>
-            </>
-          ) : null}
-          {options?.editingAVUId !== avu.id && avu.links?.update ? (
-            <ActionIcon
-              variant="subtle"
-              aria-label={`Edit AVU ${avu.attrib}`}
-              onClick={() => options?.onEdit(avu)}
-            >
-              <IconEdit size={16} />
-            </ActionIcon>
-          ) : null}
-          {options?.editingAVUId !== avu.id && avu.links?.delete ? (
-            <ActionIcon
-              variant="subtle"
-              color="red"
-              aria-label={`Delete AVU ${avu.attrib}`}
-              onClick={() => options?.onDelete(avu)}
-            >
-              <IconTrash size={16} />
-            </ActionIcon>
-          ) : null}
-          {options?.editingAVUId !== avu.id && !avu.links?.update && !avu.links?.delete ? (
-            <Text size="sm" c="dimmed">
-              Unavailable
-            </Text>
-          ) : null}
-        </Group>
-      </Table.Td>
-    </Table.Tr>
-  ))
 }
 
 function checksumValueOnly(checksum?: { checksum?: string; type?: string }) {
@@ -3540,94 +3409,21 @@ export function ExplorerDetailsPage() {
                             {avuQuery.error.message}
                           </Alert>
                         ) : (
-                          <Table highlightOnHover verticalSpacing="sm">
-                              <Table.Thead>
-                                <Table.Tr>
-                                  <Table.Th>Attribute</Table.Th>
-                                  <Table.Th>Value</Table.Th>
-                                  <Table.Th>Unit</Table.Th>
-                                  <Table.Th>Actions</Table.Th>
-                                </Table.Tr>
-                              </Table.Thead>
-                              <Table.Tbody>
-                                {avuQuery.isLoading ? (
-                                  <Table.Tr>
-                                    <Table.Td colSpan={4}>
-                                      <Text size="sm" c="dimmed">
-                                        Loading AVUs...
-                                      </Text>
-                                    </Table.Td>
-                                  </Table.Tr>
-                                ) : isAddingAVU ? (
-                                  <Table.Tr className="explorer-row-selected">
-                                    <Table.Td>
-                                      <TextInput
-                                        placeholder="Attribute"
-                                        value={avuForm.attrib}
-                                        onChange={(event) => {
-                                          const value = event.currentTarget.value
-                                          setAVUForm((current) => ({
-                                            ...current,
-                                            attrib: value,
-                                          }))
-                                        }}
-                                      />
-                                    </Table.Td>
-                                    <Table.Td>
-                                      <TextInput
-                                        placeholder="Value"
-                                        value={avuForm.value}
-                                        onChange={(event) => {
-                                          const value = event.currentTarget.value
-                                          setAVUForm((current) => ({
-                                            ...current,
-                                            value,
-                                          }))
-                                        }}
-                                      />
-                                    </Table.Td>
-                                    <Table.Td>
-                                      <TextInput
-                                        placeholder="Unit"
-                                        value={avuForm.unit}
-                                        onChange={(event) => {
-                                          const value = event.currentTarget.value
-                                          setAVUForm((current) => ({
-                                            ...current,
-                                            unit: value,
-                                          }))
-                                        }}
-                                      />
-                                    </Table.Td>
-                                    <Table.Td>
-                                      <Group gap="xs" wrap="nowrap">
-                                        <Button
-                                          size="xs"
-                                          onClick={submitAVUEditor}
-                                          loading={addAVUMutation.isPending}
-                                        >
-                                          Add
-                                        </Button>
-                                        <Button size="xs" variant="default" onClick={cancelAVUEditor}>
-                                          Cancel
-                                        </Button>
-                                      </Group>
-                                    </Table.Td>
-                                  </Table.Tr>
-                                ) : (
-                                  avuRows(avuQuery.data?.avus, {
-                                    editingAVUId: editingAVU?.id,
-                                    form: avuForm,
-                                    isSaving: updateAVUMutation.isPending,
-                                    onCancelEdit: cancelAVUEditor,
-                                    onChange: setAVUForm,
-                                    onDelete: beginAVUDelete,
-                                    onEdit: beginAVUEdit,
-                                    onSubmitEdit: submitAVUUpdate,
-                                  })
-                                )}
-                              </Table.Tbody>
-                            </Table>
+                          <AVUMetadataTable
+                            avus={avuQuery.data?.avus}
+                            editingAVUId={editingAVU?.id}
+                            form={avuForm}
+                            isAdding={isAddingAVU}
+                            isCreating={addAVUMutation.isPending}
+                            isLoading={avuQuery.isLoading}
+                            isSaving={updateAVUMutation.isPending}
+                            onCancel={cancelAVUEditor}
+                            onChange={setAVUForm}
+                            onDelete={beginAVUDelete}
+                            onEdit={beginAVUEdit}
+                            onSubmitAdd={submitAVUEditor}
+                            onSubmitEdit={submitAVUUpdate}
+                          />
                         )}
                       </Stack>
                     </Card>
