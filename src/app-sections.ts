@@ -7,6 +7,7 @@ import {
   IconUsersGroup,
   type Icon,
 } from '@tabler/icons-react'
+import type { StarbaseConfig } from './config/starbase-config'
 
 export interface AppSectionDefinition {
   slug: string
@@ -14,6 +15,7 @@ export interface AppSectionDefinition {
   icon: Icon
   importPage: () => Promise<Record<string, unknown>>
   exportName: string
+  isEnabled?: (config: StarbaseConfig) => boolean
 }
 
 export const primarySections: AppSectionDefinition[] = [
@@ -44,8 +46,13 @@ export const primarySections: AppSectionDefinition[] = [
     icon: IconUsersGroup,
     importPage: () => import('./pages/UsersPage'),
     exportName: 'UsersPage',
+    isEnabled: (config) => config.userGroupAdminEnabled,
   },
 ]
+
+export function enabledPrimarySections(config: StarbaseConfig) {
+  return primarySections.filter((section) => section.isEnabled?.(config) ?? true)
+}
 
 // Keep future major sections declared close to the active explorer section so the
 // shell can expand without reorganizing unrelated files later.

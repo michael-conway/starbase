@@ -41,6 +41,8 @@ Supported keys:
 - `AuthMode`: list of basic auth mode options.
 - `S3AdminEnabled`: enables S3 administration tools, including collection bucket
   mappings and user S3 API secret settings.
+- `UserGroupAdminEnabled`: enables the Users & Groups administration workspace
+  for iRODS user, group, and membership operations (default `true`).
 
 Included presets:
 
@@ -61,4 +63,5 @@ OIDCClientID: starbase-spa
 OIDCScope: openid profile email
 OIDCRedirectPath: /auth/callback
 S3AdminEnabled: true
+UserGroupAdminEnabled: true
 ```

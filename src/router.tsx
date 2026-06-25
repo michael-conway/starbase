@@ -9,7 +9,12 @@ import { OidcCallbackPage } from './pages/OidcCallbackPage'
 import { ResourceDetailsPage } from './pages/ResourceDetailsPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { SetupPage } from './pages/SetupPage'
-import { HomeRedirect, RequireSession, RouteFallback } from './router-components'
+import {
+  ConfigEnabledRoute,
+  HomeRedirect,
+  RequireSession,
+  RouteFallback,
+} from './router-components'
 
 function lazyElement(
   loadModule: () => Promise<Record<string, unknown>>,
@@ -59,7 +64,11 @@ export const router = createBrowserRouter([
           },
           ...primarySections.map((section) => ({
             path: section.slug,
-            element: lazyElement(section.importPage, section.exportName),
+            element: (
+              <ConfigEnabledRoute isEnabled={section.isEnabled}>
+                {lazyElement(section.importPage, section.exportName)}
+              </ConfigEnabledRoute>
+            ),
           })),
           {
             path: 'explorer/details',

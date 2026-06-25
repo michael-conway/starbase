@@ -26,7 +26,7 @@ import {
   IconTool,
   IconUserCircle,
 } from '@tabler/icons-react'
-import { primarySections } from './app-sections'
+import { enabledPrimarySections } from './app-sections'
 import { defaultPath } from './features/explorer'
 import { userFromOIDCToken } from './features/identity'
 import { getFavorites, getHealth, getSavedMetadataQueries, getServiceInfo } from './lib/irods-rest'
@@ -119,6 +119,7 @@ function App() {
   const authModeLabel = connection.auth.mode === 'basic' ? 'Basic auth' : 'OIDC'
   const appTitle = appConfig.config.title?.trim() || 'Starbase'
   const appSubtitle = appConfig.config.subtitle?.trim() || 'iRODS Explorer'
+  const primarySections = enabledPrimarySections(appConfig.config)
   const servicePayload = asObject(serviceInfoQuery.data)
   const serverInfo = asObject(servicePayload.server_info)
   const normalizedServerInfo = Object.keys(serverInfo).length > 0 ? serverInfo : servicePayload

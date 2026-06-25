@@ -1612,6 +1612,62 @@ export function updateUser(
   )
 }
 
+export function updateUserType(
+  userName: string,
+  payload: { type: IRODSUserMutationType },
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: UserMutationOptions,
+) {
+  const normalizedUserName = requireNonEmptyValue(userName, 'user_name')
+
+  return request<UserResponse>(
+    withOptionalParams(
+      `/api/v1/user/${encodeURIComponent(normalizedUserName)}/type`,
+      mutationParams(options),
+    ),
+    {
+      auth,
+      baseUrl,
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        type: payload.type,
+      }),
+    },
+  )
+}
+
+export function updateUserPassword(
+  userName: string,
+  payload: { password: string },
+  auth: RequestAuth,
+  baseUrl?: string,
+  options?: UserMutationOptions,
+) {
+  const normalizedUserName = requireNonEmptyValue(userName, 'user_name')
+
+  return request<UserResponse>(
+    withOptionalParams(
+      `/api/v1/user/${encodeURIComponent(normalizedUserName)}/password`,
+      mutationParams(options),
+    ),
+    {
+      auth,
+      baseUrl,
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        password: requireNonEmptyValue(payload.password, 'password'),
+      }),
+    },
+  )
+}
+
 export async function deleteUser(
   userName: string,
   auth: RequestAuth,

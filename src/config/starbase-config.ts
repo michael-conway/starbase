@@ -14,6 +14,7 @@ export interface StarbaseConfig {
   oidcRedirectPath: string
   authModes: StarbaseAuthModeOption[]
   s3AdminEnabled: boolean
+  userGroupAdminEnabled: boolean
 }
 
 const buildTimeRestApiBaseUrl = normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL ?? '')
@@ -38,6 +39,7 @@ export const defaultStarbaseConfig: StarbaseConfig = {
     },
   ],
   s3AdminEnabled: false,
+  userGroupAdminEnabled: true,
 }
 
 function parseYamlScalar(value: string) {
@@ -320,6 +322,11 @@ export function parseStarbaseYamlConfig(yaml: string): StarbaseConfig {
     'S3AdminEnabled',
     defaultStarbaseConfig.s3AdminEnabled,
   )
+  const userGroupAdminEnabled = parseBooleanKey(
+    lines,
+    'UserGroupAdminEnabled',
+    defaultStarbaseConfig.userGroupAdminEnabled,
+  )
 
   return {
     title,
@@ -332,6 +339,7 @@ export function parseStarbaseYamlConfig(yaml: string): StarbaseConfig {
     oidcRedirectPath,
     authModes: authModes.length > 0 ? authModes : defaultStarbaseConfig.authModes,
     s3AdminEnabled,
+    userGroupAdminEnabled,
   }
 }
 

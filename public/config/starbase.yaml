@@ -16,6 +16,7 @@ OIDCScope: openid profile email
 OIDCRedirectPath: /auth/callback
 
 S3AdminEnabled: true
+UserGroupAdminEnabled: true
 
 AuthMode:
   - Mode: native

@@ -1,5 +1,8 @@
 import { Loader, Stack } from '@mantine/core'
+import type { ReactNode } from 'react'
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
+import type { StarbaseConfig } from './config/starbase-config'
+import { useAppConfig } from './providers/use-app-config'
 import { useSession } from './providers/use-session'
 
 export function HomeRedirect() {
@@ -17,6 +20,22 @@ export function RequireSession() {
   }
 
   return <Outlet />
+}
+
+export function ConfigEnabledRoute({
+  children,
+  isEnabled,
+}: {
+  children: ReactNode
+  isEnabled?: (config: StarbaseConfig) => boolean
+}) {
+  const { config } = useAppConfig()
+
+  if (isEnabled && !isEnabled(config)) {
+    return <Navigate to="/app/explorer" replace />
+  }
+
+  return children
 }
 
 export function RouteFallback() {

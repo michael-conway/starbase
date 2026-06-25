@@ -433,6 +433,16 @@ export function SettingsPage() {
               {appConfig.config.s3AdminEnabled ? 'Enabled' : 'Disabled'}
             </Badge>
           </Grid.Col>
+          <Grid.Col span={4}>
+            <Text size="sm" c="dimmed">
+              Users & Groups admin
+            </Text>
+          </Grid.Col>
+          <Grid.Col span={8}>
+            <Badge variant="light" color={appConfig.config.userGroupAdminEnabled ? 'teal' : 'gray'}>
+              {appConfig.config.userGroupAdminEnabled ? 'Enabled' : 'Disabled'}
+            </Badge>
+          </Grid.Col>
         </Grid>
         {appConfig.error ? (
           <Text size="sm" mt={4}>

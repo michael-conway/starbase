@@ -210,7 +210,8 @@ Backend contract:
 * use `GET /api/v1/user` for user listing and prefix search
 * use `POST /api/v1/user` for user creation
 * use `GET /api/v1/user/{user_name}` for user details
-* use `PUT /api/v1/user/{user_name}` for user type/password updates
+* use `PUT /api/v1/user/{user_name}/type` for user type updates
+* use `PUT /api/v1/user/{user_name}/password` for password updates
 * use `DELETE /api/v1/user/{user_name}` for user deletion
 * use `GET /api/v1/usergroup` for group listing and prefix search
 * use `POST /api/v1/usergroup` for group creation
@@ -310,8 +311,8 @@ Step 4: User Mutation Workflows
 Step 4 implementation notes:
 
 * `/app/users` has create, edit, and delete user workflows backed by
-  `POST /api/v1/user`, `PUT /api/v1/user/{user_name}`, and
-  `DELETE /api/v1/user/{user_name}`
+  `POST /api/v1/user`, `PUT /api/v1/user/{user_name}/type`,
+  `PUT /api/v1/user/{user_name}/password`, and `DELETE /api/v1/user/{user_name}`
 * create accepts name, user type, optional initial password, and optional zone
   for `rodsadmin`; for `groupadmin`, create is limited to `rodsuser` with a
   still-optional initial password because PAM-authenticated users may not have
@@ -353,6 +354,7 @@ Step 5 authorization notes:
 * `groupadmin` can add users to groups through the `atg`-equivalent backend
   flow and remove users from groups through the `rfg`-equivalent backend flow
 * `groupadmin` cannot change existing user password/type and cannot delete users
+  or groups
 
 Step 5 implementation notes:
 
@@ -361,12 +363,14 @@ Step 5 implementation notes:
   `GET /api/v1/usergroup/{group_name}`
 * `mkgroup` is represented by the create-group modal backed by
   `POST /api/v1/usergroup`
+* after a groupadmin creates an empty group, Starbase opens that group and
+  constrains the first add-member action to the current groupadmin user so the
+  UI follows the `igroupadmin mkgroup` then `igroupadmin atg group self` flow
 * `atg` is represented by the add-member control in group details, backed by
   `POST /api/v1/usergroup/{group_name}/member`
 * `rfg` is represented by a remove-member confirmation modal, backed by
   `DELETE /api/v1/usergroup/{group_name}/member/{user_name}`
-* group deletion is available to rodsadmin/groupadmin-capable sessions through
-  `DELETE /api/v1/usergroup/{group_name}`
+* group deletion is rodsadmin-only through `DELETE /api/v1/usergroup/{group_name}`
 * group and membership mutations invalidate group summaries, group details,
   user membership summaries, and reverse membership queries
 

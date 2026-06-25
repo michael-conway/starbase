@@ -217,6 +217,7 @@ OIDCClientID: starbase-spa
 OIDCScope: openid profile email
 OIDCRedirectPath: /auth/callback
 S3AdminEnabled: true
+UserGroupAdminEnabled: true
 ```
 
 Set `VITE_STARBASE_CONFIG_PATH=<path>` at build time to load an explicit config file:
@@ -251,6 +252,9 @@ Supported config keys:
 * `S3AdminEnabled`: enables S3 administration tools backed by
   `irods-go-rest` `/api/v1/ext/s3/*` routes, including collection bucket
   mappings and user S3 API secret settings
+* `UserGroupAdminEnabled`: enables the Users & Groups administration workspace
+  backed by `irods-go-rest` `/api/v1/user*`, `/api/v1/usergroup*`, and
+  `/api/v1/principal` routes; defaults to `true`
 
 See [public/config/README.md](./public/config/README.md) for the file-level
 runtime config notes.

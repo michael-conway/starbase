@@ -50,7 +50,8 @@ import {
   type UserMembershipSummary,
   removeUserGroupMember,
   searchUsers,
-  updateUser,
+  updateUserPassword,
+  updateUserType,
   userGroupDetailCacheKey,
   userGroupSummaryCacheKey,
   userMembershipSummaryCacheKey,
@@ -151,6 +152,12 @@ function normalizedPrefix(value: string) {
   return trimmed.length >= 3 ? trimmed : undefined
 }
 
+function formatPrincipalName(userName: string, userZone: string, groupZone?: string) {
+  return groupZone && userZone && userZone !== groupZone
+    ? `${userName}#${userZone}`
+    : userName
+}
+
 export function UsersPage() {
   const { connection, currentUserMembership } = useSession()
   const queryClient = useQueryClient()
@@ -173,12 +180,14 @@ export function UsersPage() {
   const [deletingGroup, setDeletingGroup] = useState<UserGroupSummary | null>(null)
   const [removingMember, setRemovingMember] = useState<UserGroupMember | null>(null)
   const [memberName, setMemberName] = useState('')
+  const currentUser = currentUserMembership?.current_user.user
   const isCurrentRodsadmin = Boolean(currentUserMembership?.current_user.is_rodsadmin)
   const isCurrentGroupadmin = Boolean(currentUserMembership?.current_user.is_groupadmin)
   const canCreateUsers = isCurrentRodsadmin || isCurrentGroupadmin
   const canManageGroups = isCurrentRodsadmin || isCurrentGroupadmin
   const canEditUsers = isCurrentRodsadmin
   const canDeleteUsers = isCurrentRodsadmin
+  const canDeleteGroups = isCurrentRodsadmin
   const canSetGroupadmin = isCurrentRodsadmin
   const availableUserTypeOptions = isCurrentRodsadmin
     ? rodsadminUserTypeOptions
@@ -242,6 +251,29 @@ export function UsersPage() {
       }),
     enabled: Boolean(selectedGroup) && memberName.trim().length >= 3,
   })
+  const selectedGroupMembers = selectedGroupQuery.data?.group.members ?? []
+  const selectedGroupIsEmpty = selectedGroupQuery.isSuccess && selectedGroupMembers.length === 0
+  const currentUserPrincipalName = currentUser
+    ? formatPrincipalName(currentUser.name, currentUser.zone, selectedGroup?.zone)
+    : ''
+  const currentUserIsSelectedGroupMember = Boolean(
+    currentUser &&
+      selectedGroupMembers.some(
+        (member) =>
+          member.name === currentUser.name &&
+          (!member.zone || !currentUser.zone || member.zone === currentUser.zone),
+      ),
+  )
+  const groupadminNeedsSelfMembership =
+    isCurrentGroupadmin &&
+    !isCurrentRodsadmin &&
+    selectedGroupIsEmpty &&
+    Boolean(currentUserPrincipalName)
+  const canManageSelectedGroupMembers =
+    isCurrentRodsadmin ||
+    (isCurrentGroupadmin &&
+      (currentUserIsSelectedGroupMember || groupadminNeedsSelfMembership))
+  const addMemberName = groupadminNeedsSelfMembership ? currentUserPrincipalName : memberName
   const invalidateUserQueries = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['user-membership-summary'] }),
@@ -272,6 +304,7 @@ export function UsersPage() {
         connection.baseUrl,
         {
           zone: createZone.trim() || undefined,
+          reconcile: false,
         },
       ),
     onSuccess: async () => {
@@ -284,23 +317,46 @@ export function UsersPage() {
     },
   })
   const updateUserMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       if (!editingUser) {
         throw new ApiError(400, 'Select a user to edit.')
       }
 
-      return updateUser(
-        editingUser.name,
-        {
-          type: editType || undefined,
-          password: editPassword.trim() || undefined,
-        },
-        connection.auth,
-        connection.baseUrl,
-        {
-          zone: editZone.trim() || undefined,
-        },
-      )
+      if (!isCurrentRodsadmin) {
+        throw new ApiError(403, 'Only rodsadmin users can change user type or password.')
+      }
+
+      const zoneOptions = {
+        zone: editZone.trim() || undefined,
+      }
+      const trimmedPassword = editPassword.trim()
+      let result
+
+      if (editType && editType !== editingUser.type) {
+        result = await updateUserType(
+          editingUser.name,
+          { type: editType },
+          connection.auth,
+          connection.baseUrl,
+          zoneOptions,
+        )
+      }
+
+      if (trimmedPassword) {
+        result = await updateUserPassword(
+          editingUser.name,
+          { password: trimmedPassword },
+          connection.auth,
+          connection.baseUrl,
+          zoneOptions,
+        )
+      }
+
+      if (!result) {
+        throw new ApiError(400, 'Choose a user type change or enter a new password.')
+      }
+
+      return result
     },
     onSuccess: async () => {
       await invalidateUserQueries()
@@ -334,19 +390,38 @@ export function UsersPage() {
         connection.baseUrl,
         {
           zone: createGroupZone.trim() || undefined,
+          reconcile: false,
         },
       ),
-    onSuccess: async () => {
+    onSuccess: async (response) => {
       await invalidateGroupQueries()
       setCreateGroupOpened(false)
       setCreateGroupName('')
       setCreateGroupZone('')
+      if (isCurrentGroupadmin && !isCurrentRodsadmin) {
+        setSelectedGroup({
+          id: response.group.id,
+          name: response.group.name,
+          zone: response.group.zone,
+          type: response.group.type,
+          member_count: response.group.members?.length ?? 0,
+        })
+        setMemberName(
+          currentUser
+            ? formatPrincipalName(currentUser.name, currentUser.zone, response.group.zone)
+            : '',
+        )
+      }
     },
   })
   const deleteGroupMutation = useMutation({
     mutationFn: () => {
       if (!deletingGroup) {
         throw new ApiError(400, 'Select a group to delete.')
+      }
+
+      if (!isCurrentRodsadmin) {
+        throw new ApiError(403, 'Only rodsadmin users can delete groups.')
       }
 
       return deleteUserGroup(deletingGroup.name, connection.auth, connection.baseUrl, {
@@ -370,7 +445,7 @@ export function UsersPage() {
       return addUserGroupMember(
         selectedGroup.name,
         {
-          user_name: memberName,
+          user_name: addMemberName,
         },
         connection.auth,
         connection.baseUrl,
@@ -560,7 +635,7 @@ export function UsersPage() {
             </Button>
             <Button
               loading={updateUserMutation.isPending}
-              disabled={!editType && !editPassword.trim()}
+              disabled={editType === editingUser?.type && !editPassword.trim()}
               onClick={() => updateUserMutation.mutate()}
             >
               Save
@@ -685,6 +760,21 @@ export function UsersPage() {
             </Alert>
           ) : null}
 
+          {selectedGroupQuery.data &&
+          isCurrentGroupadmin &&
+          !isCurrentRodsadmin &&
+          !canManageSelectedGroupMembers ? (
+            <Alert color="yellow" variant="light" title="Membership required">
+              Add your own account to this group before managing other members.
+            </Alert>
+          ) : null}
+
+          {groupadminNeedsSelfMembership ? (
+            <Alert color="blue" variant="light" title="Add yourself first">
+              Add your own account to this empty group before adding other members.
+            </Alert>
+          ) : null}
+
           {selectedGroupQuery.data ? (
             <Stack gap="md">
               <Group gap="xs">
@@ -696,19 +786,20 @@ export function UsersPage() {
                 </Badge>
               </Group>
 
-              {canManageGroups ? (
+              {canManageSelectedGroupMembers ? (
                 <Group align="flex-end">
                   <Autocomplete
                     label="Add member"
                     placeholder="Username or username#zone"
-                    value={memberName}
+                    value={addMemberName}
                     data={memberOptions}
+                    disabled={groupadminNeedsSelfMembership}
                     onChange={setMemberName}
                   />
                   <Button
                     leftSection={<IconPlus size={16} />}
                     loading={addMemberMutation.isPending}
-                    disabled={!memberName.trim()}
+                    disabled={!addMemberName.trim()}
                     onClick={() => addMemberMutation.mutate()}
                   >
                     Add
@@ -722,13 +813,13 @@ export function UsersPage() {
                     <Table.Th>Member</Table.Th>
                     <Table.Th>Type</Table.Th>
                     <Table.Th>Zone</Table.Th>
-                    {canManageGroups ? <Table.Th>Actions</Table.Th> : null}
+                    {canManageSelectedGroupMembers ? <Table.Th>Actions</Table.Th> : null}
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
                   {(selectedGroupQuery.data.group.members ?? []).length === 0 ? (
                     <Table.Tr>
-                      <Table.Td colSpan={canManageGroups ? 4 : 3}>
+                      <Table.Td colSpan={canManageSelectedGroupMembers ? 4 : 3}>
                         <Text size="sm" c="dimmed">
                           No members returned.
                         </Text>
@@ -740,7 +831,7 @@ export function UsersPage() {
                         <Table.Td>{member.name}</Table.Td>
                         <Table.Td>{member.type}</Table.Td>
                         <Table.Td>{member.zone}</Table.Td>
-                        {canManageGroups ? (
+                        {canManageSelectedGroupMembers ? (
                           <Table.Td>
                             <ActionIcon
                               variant="subtle"
@@ -946,7 +1037,7 @@ export function UsersPage() {
                 query={groupsQuery}
                 onViewGroup={openGroupDetails}
                 onDeleteGroup={openDeleteGroup}
-                canManageGroups={canManageGroups}
+                canDeleteGroups={canDeleteGroups}
                 actionDisabled={deleteGroupMutation.isPending}
               />
             </Tabs.Panel>
@@ -1087,13 +1178,13 @@ function GroupsTable({
   query,
   onViewGroup,
   onDeleteGroup,
-  canManageGroups,
+  canDeleteGroups,
   actionDisabled,
 }: {
   query: UseQueryResult<Awaited<ReturnType<typeof getUserGroupSummaries>>, Error>
   onViewGroup: (group: UserGroupSummary) => void
   onDeleteGroup: (group: UserGroupSummary) => void
-  canManageGroups: boolean
+  canDeleteGroups: boolean
   actionDisabled: boolean
 }) {
   if (query.isLoading) {
@@ -1167,7 +1258,7 @@ function GroupsTable({
                   >
                     <IconListDetails size={16} />
                   </ActionIcon>
-                  {canManageGroups ? (
+                  {canDeleteGroups ? (
                     <ActionIcon
                       variant="subtle"
                       color="red"
