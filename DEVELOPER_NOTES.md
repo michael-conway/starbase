@@ -281,6 +281,23 @@ Step 3: Read-Only Users And Groups Page
   reverse membership lookup, or filtered principals require multiple requests
   per displayed row
 
+Step 3 implementation notes:
+
+* `/app/users` is active as a read-only first pass with `Users` and `Groups`
+  tabs, shared zone and prefix filters, loading, empty, error, and explicit
+  `403` unauthorized states
+* the user table uses `GET /api/v1/user/membership-summary` so rows can show
+  user name, type, zone, and group memberships without per-user reverse
+  membership requests
+* the group table uses `GET /api/v1/usergroup/summary` so member counts are
+  list-scale data rather than repeated group detail fetches
+* no broad client-side joins, catalog-wide filtering, or per-row detail fetches
+  are currently needed for the read-only page
+* selected user/group detail views should continue using dedicated backend
+  routes, such as `GET /api/v1/user/{user_name}/usergroup` for reverse
+  membership and `GET /api/v1/principal` for combined principal search, rather
+  than joining large lists in the browser
+
 Step 4: User Mutation Workflows
 
 * add create-user modal with name, type, optional initial password, and optional
@@ -290,6 +307,30 @@ Step 4: User Mutation Workflows
 * invalidate user queries after successful mutations
 * handle `409`, `403`, and `404` with specific user-facing messages
 
+Step 4 implementation notes:
+
+* `/app/users` has create, edit, and delete user workflows backed by
+  `POST /api/v1/user`, `PUT /api/v1/user/{user_name}`, and
+  `DELETE /api/v1/user/{user_name}`
+* create accepts name, user type, optional initial password, and optional zone
+  for `rodsadmin`; for `groupadmin`, create is limited to `rodsuser` with a
+  still-optional initial password because PAM-authenticated users may not have
+  an iRODS native password
+* edit supports user type and/or password updates; returned user types outside
+  the mutation enum are not silently coerced before submission
+* `groupadmin` is available in create/edit type selectors only when
+  `GET /api/v1/user/me` reports the current user is `rodsadmin`
+* `irods-go-rest` does not allow a logged-in `groupadmin` user to change user
+  password or type, so Starbase hides edit-user controls unless the current
+  user is `rodsadmin`
+* `groupadmin` cannot delete users, so Starbase hides delete-user controls
+  unless the current user is `rodsadmin`; delete uses an explicit confirmation
+  modal scoped to the selected user's zone
+* successful mutations invalidate user membership summaries, user list/detail,
+  reverse membership, and group summary queries so visible list data refreshes
+* mutation error handling distinguishes `409`, `403`, and `404` before falling
+  back to the backend error message
+
 Step 5: Group And Membership Workflows
 
 * add create-group modal
@@ -298,6 +339,36 @@ Step 5: Group And Membership Workflows
 * remove member with confirmation
 * delete group with confirmation
 * invalidate group detail and group list queries after membership mutations
+
+Step 5 authorization notes:
+
+* align Starbase groupadmin affordances with `igroupadmin` rather than generic
+  rodsadmin catalog powers
+* regular users may list groups through the `lg`-equivalent backend flow when
+  allowed by `irods-go-rest`
+* `groupadmin` can create `rodsuser` users through the `mkuser`-equivalent
+  backend flow; Starbase keeps initial password optional because some
+  deployments use PAM-authenticated users without native iRODS passwords
+* `groupadmin` can create groups through the `mkgroup`-equivalent backend flow
+* `groupadmin` can add users to groups through the `atg`-equivalent backend
+  flow and remove users from groups through the `rfg`-equivalent backend flow
+* `groupadmin` cannot change existing user password/type and cannot delete users
+
+Step 5 implementation notes:
+
+* `/app/users` exposes `lg`-equivalent group summary rows and group detail
+  member lists through `GET /api/v1/usergroup/summary` and
+  `GET /api/v1/usergroup/{group_name}`
+* `mkgroup` is represented by the create-group modal backed by
+  `POST /api/v1/usergroup`
+* `atg` is represented by the add-member control in group details, backed by
+  `POST /api/v1/usergroup/{group_name}/member`
+* `rfg` is represented by a remove-member confirmation modal, backed by
+  `DELETE /api/v1/usergroup/{group_name}/member/{user_name}`
+* group deletion is available to rodsadmin/groupadmin-capable sessions through
+  `DELETE /api/v1/usergroup/{group_name}`
+* group and membership mutations invalidate group summaries, group details,
+  user membership summaries, and reverse membership queries
 
 Step 6: Integration Verification
 

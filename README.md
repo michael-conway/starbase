@@ -17,6 +17,7 @@ It includes:
 * path-first collection and data object browsing
 * object detail views for overview, storage, AVUs, permissions, and tickets
 * resource listing and resource detail pages
+* user and group membership summary browsing
 * queued upload management with progress and overwrite handling
 * runtime app branding and auth-mode configuration from YAML files in `public/config`
 * local development conventions matched to `irods-grid-stack`
@@ -98,11 +99,12 @@ workspace interactions, runtime configuration, and browser-oriented UI.
 | `/app/search/results/:queryId` | Saved metadata query results |
 | `/app/resources` | iRODS resource listing |
 | `/app/resources/details` | Resource detail page |
+| `/app/users` | Users, groups, and membership summaries |
 | `/app/settings` | Session settings and enabled user tools |
 | `/app/setup` | Setup page inside the authenticated shell |
 
-Rules and admin pages are scaffolded in `src/pages/` and declared as future
-sections in `src/app-sections.ts`, but they are not part of the active
+Rules and generic admin pages are scaffolded in `src/pages/` and declared as
+future sections in `src/app-sections.ts`, but they are not part of the active
 navigation or route table yet.
 
 ## Quick Start
@@ -306,7 +308,10 @@ Current backend areas used by the frontend include:
 * `/api/v1/path/checksum`
 * `/api/v1/resource`
 * `/api/v1/user`
+* `/api/v1/user/me`
+* `/api/v1/user/membership-summary`
 * `/api/v1/usergroup`
+* `/api/v1/usergroup/summary`
 * `/api/v1/ticket`
 * `/api/v1/ext/favorites`
 

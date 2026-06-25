@@ -4,6 +4,7 @@ import {
   IconCode,
   IconSearch,
   IconSettings,
+  IconUsersGroup,
   type Icon,
 } from '@tabler/icons-react'
 
@@ -36,6 +37,13 @@ export const primarySections: AppSectionDefinition[] = [
     icon: IconServer2,
     importPage: () => import('./pages/ResourcesPage'),
     exportName: 'ResourcesPage',
+  },
+  {
+    slug: 'users',
+    label: 'Users & Groups',
+    icon: IconUsersGroup,
+    importPage: () => import('./pages/UsersPage'),
+    exportName: 'UsersPage',
   },
 ]
 

@@ -375,7 +375,7 @@ export interface ResourceCollectionResponse {
 }
 
 export type IRODSUserType = 'rodsuser' | 'rodsadmin' | 'groupadmin'
-export type IRODSUserMutationType = 'rodsuser' | 'rodsadmin'
+export type IRODSUserMutationType = 'rodsuser' | 'rodsadmin' | 'groupadmin'
 export type IRODSGroupType = 'rodsgroup'
 export type IRODSPrincipalKind = 'user' | 'group'
 export type IRODSPrincipalType = IRODSUserType | IRODSGroupType
